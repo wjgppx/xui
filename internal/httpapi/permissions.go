@@ -6,9 +6,9 @@ import (
 )
 
 var rolePermissions = map[string][]string{
-	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles"},
+	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry"},
 	"support":  {"orders.read", "users.read"},
-	"finance":  {"overview.read", "orders.read", "plans.write"},
+	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry"},
 	"operator": {"nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry"},
 	"user":     {},
 }
@@ -25,6 +25,13 @@ func permitted(role, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/admin/payments" || p == "/api/v1/admin/payment-activity":
+		return "payments.read"
+	case strings.HasPrefix(p, "/api/v1/admin/payments/"):
+		if r.Method == "GET" {
+			return "payments.read"
+		}
+		return "payments.retry"
 	case p == "/api/v1/admin/overview":
 		return "overview.read"
 	case p == "/api/v1/admin/orders":

@@ -92,14 +92,31 @@ func (s *Server) createPayment(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, p)
 		return
 	}
+	if !s.paymentActivity(w, r, p.ID, p.Provider, "create", "created") {
+		return
+	}
 	checkout, err := provider.Create(r.Context(), s.paymentRequest(p, o))
 	if err != nil {
+		outcome := "gateway_error"
+		if errors.Is(err, payments.ErrVerification) {
+			outcome = "verification_error"
+		}
+		if !s.paymentActivity(w, r, p.ID, p.Provider, "create", outcome) {
+			return
+		}
 		fail(w, 502, "支付渠道暂时不可用，请使用同一订单重试")
 		return
 	}
+	paymentID := p.ID
 	p, err = s.Store.SavePaymentCheckout(r.Context(), p.ID, checkout.Kind, checkout.URL)
 	if err != nil {
+		if !s.paymentActivity(w, r, paymentID, body.Provider, "create", paymentStoreOutcome(err)) {
+			return
+		}
 		s.paymentStoreError(w, err)
+		return
+	}
+	if !s.paymentActivity(w, r, p.ID, p.Provider, "create", p.Status) {
 		return
 	}
 	reply(w, 200, p)
@@ -137,6 +154,9 @@ func (s *Server) syncPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	provider, ok := s.Config.Payments.Get(p.Provider)
 	if !ok {
+		if !s.paymentActivity(w, r, p.ID, p.Provider, "query", "provider_unavailable") {
+			return
+		}
 		fail(w, 404, "该支付渠道未启用")
 		return
 	}
@@ -147,29 +167,58 @@ func (s *Server) syncPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := provider.Query(r.Context(), s.paymentRequest(p, o))
 	if errors.Is(err, payments.ErrNotPaid) {
+		if !s.paymentActivity(w, r, p.ID, p.Provider, "query", "not_paid") {
+			return
+		}
+		// A callback may have committed while this request was querying the gateway.
+		p, err = s.Store.Payment(r.Context(), u.ID, p.OrderID)
+		if err != nil {
+			s.paymentStoreError(w, err)
+			return
+		}
 		reply(w, 200, p)
 		return
 	}
 	if err != nil {
+		outcome := "gateway_error"
+		if errors.Is(err, payments.ErrVerification) {
+			outcome = "verification_error"
+		}
+		if !s.paymentActivity(w, r, p.ID, p.Provider, "query", outcome) {
+			return
+		}
 		fail(w, 502, "暂时无法验证渠道支付结果，请稍后刷新订单")
 		return
 	}
 	// Queries are authoritative only after adapter verification and exact binding
 	// to the stored merchant request identity and purchase snapshot.
 	if n.PaymentID != p.ID || n.Amount != o.Price || n.Currency != o.Currency {
+		if !s.paymentActivity(w, r, p.ID, p.Provider, "query", "conflict") {
+			return
+		}
 		fail(w, 502, "渠道支付结果与订单不一致")
 		return
 	}
 	if n.Paid {
 		if err = s.Store.SettlePayment(r.Context(), p.ID, p.Provider, n.TransactionID, n.Amount, n.Currency); err != nil {
+			if !s.paymentActivity(w, r, p.ID, p.Provider, "query", paymentStoreOutcome(err)) {
+				return
+			}
 			s.paymentStoreError(w, err)
 			return
 		}
-		p, err = s.Store.Payment(r.Context(), u.ID, p.OrderID)
-		if err != nil {
-			s.paymentStoreError(w, err)
-			return
-		}
+	}
+	outcome := "pending"
+	if n.Paid {
+		outcome = "paid"
+	}
+	if !s.paymentActivity(w, r, p.ID, p.Provider, "query", outcome) {
+		return
+	}
+	p, err = s.Store.Payment(r.Context(), u.ID, p.OrderID)
+	if err != nil {
+		s.paymentStoreError(w, err)
+		return
 	}
 	reply(w, 200, p)
 }
@@ -196,30 +245,73 @@ func (s *Server) paymentNotify(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("provider")
 	provider, ok := s.Config.Payments.Get(id)
 	if !ok {
+		if paymentProviderID(id) {
+			if !s.allowedKey(r, "invalid-notify:"+id+":", 10) {
+				paymentAcknowledgement(w, id, 400)
+				return
+			}
+			if err := s.Store.RecordPaymentActivity(r.Context(), "", id, "notify", "provider_unavailable"); err != nil {
+				paymentAcknowledgement(w, id, 500)
+				return
+			}
+		}
 		paymentAcknowledgement(w, id, 404)
 		return
 	}
+	record := func(paymentID, outcome string) bool {
+		if err := s.Store.RecordPaymentActivity(r.Context(), paymentID, id, "notify", outcome); err != nil {
+			paymentAcknowledgement(w, id, 500)
+			return false
+		}
+		return true
+	}
+	invalid := func() bool {
+		// Invalid notifications are rejected regardless of the logging budget. Keep
+		// a bounded diagnostic sample rather than giving unauthenticated senders an
+		// unbounded append-only storage sink. Valid provider proofs bypass this cap.
+		if !s.allowedKey(r, "invalid-notify:"+id+":", 10) {
+			paymentAcknowledgement(w, id, 400)
+			return false
+		}
+		return record("", "verification_error")
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 65536)
 	if len(r.URL.RawQuery) > 65536 {
+		if !invalid() {
+			return
+		}
 		paymentAcknowledgement(w, id, 400)
 		return
 	}
 	n, err := provider.Verify(r)
 	if err != nil {
+		// Unverified request content never chooses the payment record to annotate.
+		if !invalid() {
+			return
+		}
 		paymentAcknowledgement(w, id, 400)
 		return
 	}
 	if !n.Paid {
+		if !record(n.PaymentID, "pending") {
+			return
+		}
 		paymentAcknowledgement(w, id, 200)
 		return
 	}
 	err = s.Store.SettlePayment(r.Context(), n.PaymentID, id, n.TransactionID, n.Amount, n.Currency)
 	if err != nil {
+		if !record(n.PaymentID, paymentStoreOutcome(err)) {
+			return
+		}
 		status := 500
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrPaymentConflict) || errors.Is(err, store.ErrPaymentProviderConflict) {
 			status = 400
 		}
 		paymentAcknowledgement(w, id, status)
+		return
+	}
+	if !record(n.PaymentID, "paid") {
 		return
 	}
 	paymentAcknowledgement(w, id, 200)

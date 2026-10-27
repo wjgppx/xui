@@ -37,6 +37,9 @@ var securitySchema string
 //go:embed payments.sql
 var paymentSchema string
 
+//go:embed payment_lifecycle.sql
+var paymentLifecycleSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -74,6 +77,8 @@ type Order struct {
 	Status    string     `json:"status"`
 	CreatedAt time.Time  `json:"created_at"`
 	PaidAt    *time.Time `json:"paid_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	ClosedAt  *time.Time `json:"closed_at"`
 }
 type Entitlement struct {
 	ID        string     `json:"id"`
@@ -106,7 +111,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err
@@ -162,7 +167,7 @@ func (s *Store) CreateOrder(ctx context.Context, userID, planID string) (Order, 
 		return o, err
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO orders(id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
- RETURNING id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status,created_at,paid_at`, ID(), userID, plan.ID, plan.Name, plan.Price, plan.Currency, plan.Days, plan.Quota).Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt)
+ RETURNING id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status,created_at,paid_at,expires_at,closed_at`, ID(), userID, plan.ID, plan.Name, plan.Price, plan.Currency, plan.Days, plan.Quota).Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt, &o.ExpiresAt, &o.ClosedAt)
 	if err != nil {
 		return o, err
 	}
@@ -172,7 +177,7 @@ func (s *Store) CreateOrder(ctx context.Context, userID, planID string) (Order, 
 	return o, tx.Commit(ctx)
 }
 func (s *Store) Orders(ctx context.Context, userID string) ([]Order, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status,created_at,paid_at FROM orders WHERE ($1='' OR user_id=$1) ORDER BY created_at DESC LIMIT 100`, userID)
+	rows, err := s.DB.Query(ctx, `SELECT id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,CASE WHEN status='pending' AND expires_at<=clock_timestamp() THEN 'expired' ELSE status END,created_at,paid_at,expires_at,closed_at FROM orders WHERE ($1='' OR user_id=$1) ORDER BY created_at DESC LIMIT 100`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +185,7 @@ func (s *Store) Orders(ctx context.Context, userID string) ([]Order, error) {
 	out := []Order{}
 	for rows.Next() {
 		var o Order
-		if err = rows.Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt); err != nil {
+		if err = rows.Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt, &o.ExpiresAt, &o.ClosedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -231,7 +236,7 @@ func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID
 		return ErrNotFound
 	}
 	var o Order
-	err = tx.QueryRow(ctx, `SELECT id,user_id,plan_name,price_minor,currency,duration_days,quota_bytes,status FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE`, orderID, userID).Scan(&o.ID, &o.UserID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status)
+	err = tx.QueryRow(ctx, `SELECT id,user_id,plan_name,price_minor,currency,duration_days,quota_bytes,status FROM orders WHERE id=$1 AND user_id=$2 FOR NO KEY UPDATE`, orderID, userID).Scan(&o.ID, &o.UserID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -256,7 +261,7 @@ func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID
 		}
 		return nil
 	}
-	if o.Status != "pending" {
+	if o.Status != "pending" && o.Status != "expired" {
 		return ErrPaymentConflict
 	}
 	var start time.Time

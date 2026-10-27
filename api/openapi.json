@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.8.0",
-    "description": "Development platform with accounts, staff roles, shared rate limits, verified STARTTLS mail, immutable purchase snapshots, node access, durable metering, subscriptions and transactional events. Opt-in Alipay RSA2 page pay, WeChat Pay API v3 Native and classic Epay MD5 merchant adapters support verified notifications and atomic fulfillment. Real merchant acceptance, refunds and full statement reconciliation remain pending."
+    "version": "0.9.0",
+    "description": "Development subscription platform with immutable purchase snapshots, node access, durable metering and verified merchant adapters. Payment operations add expiring orders, safe pre-intent local closure, leased durable Alipay/WeChat queries, bounded retries, staff payment summaries and append-only sanitized activity. Local expiry is not remote payment closure. Real merchant acceptance, provider close/refunds and full statement reconciliation remain pending."
   },
   "paths": {
     "/healthz": {
@@ -2285,7 +2285,7 @@
             }
           }
         },
-        "description": "Uses the stored integer-CNY purchase snapshot, never browser amounts. Requires a verified email in production. First creation permanently pins one provider and stable merchant payment ID; different-provider retry returns409. Channel disabled404; provider creation failure502; per-peer10/minute and per-user5/minute limits apply independently to creation and sync. A paid callback arriving before the checkout response cannot be downgraded by that response."
+        "description": "Uses the stored integer-CNY purchase snapshot, never browser amounts. Requires a verified email in production. First creation permanently pins one provider and stable merchant payment ID; different-provider retry returns409. Channel disabled404; provider creation failure502; per-peer10/minute and per-user5/minute limits apply independently to creation and sync. A paid callback arriving before the checkout response cannot be downgraded by that response. Rejects expired, locally closed or paid orders; the30-minute deadline is checked independently of expiry scheduling."
       },
       "get": {
         "summary": "Read own payment intent",
@@ -2393,7 +2393,7 @@
             }
           }
         },
-        "description": "For Alipay and WeChat, verifies signed query responses and exact payment ID/amount/currency before atomic fulfillment. Classic Epay api.php has no authenticated response contract; this adapter does not call it or settle from unsigned JSON and returns502 until a valid signed notify is processed. Pending verified results preserve the intent. Verified email required in production; separate shared peer/user sync limit10/5 per minute. Already paid intents return their stored state."
+        "description": "For Alipay and WeChat, verifies signed query responses and exact payment ID/amount/currency before atomic fulfillment. Classic Epay api.php has no authenticated response contract; this adapter does not call it or settle from unsigned JSON and returns502 until a valid signed notify is processed. Pending verified results preserve the intent. Verified email required in production; separate shared peer/user sync limit10/5 per minute. Already paid intents return their stored state. This is also the proof boundary used by durable background reconciliation. A valid late paid result may fulfill an expired order; local expiry never substitutes for gateway closure."
       }
     },
     "/api/v1/payments/notify/{provider}": {
@@ -2829,6 +2829,292 @@
           }
         }
       }
+    },
+    "/api/v1/orders/{id}/close": {
+      "post": {
+        "summary": "Close own order only before any external payment intent",
+        "operationId": "post_api_v1_orders_id_close",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Returns the closed order; repeat close is idempotent. Other-owner/missing order404; paid order or any existing payment intent409. Pending and expired no-intent orders may close. Records closure and audit atomically; no provider close call is made. Per-peer10/minute close limit applies.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Business order ID owned by the current account."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payments": {
+      "get": {
+        "summary": "Staff: list latest100 sanitized payment intents",
+        "operationId": "get_api_v1_admin_payments",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentOverviewList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin/finance only. Optional exact status/provider/order filters; unknown, duplicate or invalid query parameters400. Excludes checkout links, raw notifications, headers and merchant configuration. Requires verified email in production. No financial status is changed by reading.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "paid",
+                "manual_required"
+              ]
+            },
+            "description": "Exact payment-intent status; manual_required selects reconciliation tasks needing intervention."
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentProvider"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Exact complete business-order ID."
+          }
+        ],
+        "x-required-permission": "payments.read"
+      }
+    },
+    "/api/v1/admin/payments/{id}/activity": {
+      "get": {
+        "summary": "Staff: read latest100 activity for a payment intent",
+        "operationId": "get_api_v1_admin_payments_id_activity",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentActivity"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin/finance only; missing payment404. Returns append-only classified activity for this trusted payment identity, newest first. No raw proof, secret or signed checkout URL. Requires verified email in production.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Payment intent ID (merchant out_trade_no), not the business-order ID."
+          }
+        ],
+        "x-required-permission": "payments.read"
+      }
+    },
+    "/api/v1/admin/payment-activity": {
+      "get": {
+        "summary": "Staff: read latest100 payment activity including unbound failures",
+        "operationId": "get_api_v1_admin_payment_activity",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecentPaymentActivity"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin/finance only. Includes finite classifications of rejected notifications whose payment_id/order_id remain null because their contents were not trusted. No raw callback, signature, checkout URL or merchant key. Requires verified email in production.",
+        "x-required-permission": "payments.read"
+      }
+    },
+    "/api/v1/admin/payments/{id}/retry": {
+      "post": {
+        "summary": "Staff: requeue verified direct-channel payment reconciliation",
+        "operationId": "post_api_v1_admin_payments_id_retry",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admin/finance only. Schedules Alipay/WeChat query and records audit atomically; never directly marks paid or grants rights. Resets counters and begins a new7-day observation horizon. Existing active lease, already-paid/closed payment or classic Epay409; missing payment404. Per-peer10/minute. Verified email required in production.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Payment intent ID to query again."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        },
+        "x-required-permission": "payments.retry"
+      }
     }
   },
   "components": {
@@ -3043,6 +3329,8 @@
             "type": "string",
             "enum": [
               "pending",
+              "expired",
+              "closed",
               "paid"
             ]
           },
@@ -3056,6 +3344,19 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created at +30 minutes; new checkout creation checks this deadline even before the scheduler marks expired."
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set only when a no-intent order is safely closed locally; this does not represent a payment-gateway close operation."
           }
         },
         "required": [
@@ -3069,7 +3370,9 @@
           "plan_name",
           "status",
           "created_at",
-          "paid_at"
+          "paid_at",
+          "expires_at",
+          "closed_at"
         ]
       },
       "Entitlement": {
@@ -4321,6 +4624,297 @@
           "updated_at",
           "paid_at"
         ]
+      },
+      "PaymentOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/PaymentProvider"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "paid"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "transaction_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "order_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "expired",
+              "closed",
+              "paid"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reconcile_status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "waiting",
+              "paid",
+              "manual_required",
+              "waiting_callback"
+            ]
+          },
+          "reconcile_attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_outcome": {
+            "type": "string",
+            "enum": [
+              "",
+              "created",
+              "ready",
+              "paid",
+              "pending",
+              "not_paid",
+              "gateway_error",
+              "verification_error",
+              "storage_error",
+              "conflict",
+              "provider_unavailable",
+              "closed",
+              "retry_scheduled",
+              "manual_required"
+            ]
+          },
+          "next_check_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "user_email",
+          "provider",
+          "status",
+          "amount_minor",
+          "currency",
+          "transaction_id",
+          "created_at",
+          "paid_at",
+          "order_status",
+          "expires_at",
+          "reconcile_status",
+          "reconcile_attempts",
+          "last_outcome",
+          "next_check_at"
+        ],
+        "description": "Sanitized staff summary; no checkout URL, provider signature, raw notification or merchant key is returned. Paid payment status wins over a stale reconciliation job status."
+      },
+      "PaymentOverviewList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentOverview"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PaymentActivity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "create",
+              "notify",
+              "query",
+              "auto_query",
+              "close",
+              "retry"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "created",
+              "ready",
+              "paid",
+              "pending",
+              "not_paid",
+              "gateway_error",
+              "verification_error",
+              "storage_error",
+              "conflict",
+              "provider_unavailable",
+              "closed",
+              "retry_scheduled",
+              "manual_required"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "order_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "",
+              "alipay",
+              "wechat",
+              "epay_alipay",
+              "epay_wechat"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "outcome",
+          "created_at",
+          "payment_id",
+          "order_id",
+          "provider"
+        ],
+        "description": "Immutable finite metadata classification, not a raw payment-provider message."
+      },
+      "RecentPaymentActivity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "create",
+              "notify",
+              "query",
+              "auto_query",
+              "close",
+              "retry"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "created",
+              "ready",
+              "paid",
+              "pending",
+              "not_paid",
+              "gateway_error",
+              "verification_error",
+              "storage_error",
+              "conflict",
+              "provider_unavailable",
+              "closed",
+              "retry_scheduled",
+              "manual_required"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "order_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "",
+              "alipay",
+              "wechat",
+              "epay_alipay",
+              "epay_wechat"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "outcome",
+          "created_at",
+          "payment_id",
+          "order_id",
+          "provider"
+        ],
+        "description": "Same sanitized activity shape as per-payment activity; untrusted notification identity stays null."
       }
     }
   },

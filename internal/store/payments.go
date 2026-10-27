@@ -46,7 +46,7 @@ func paymentProvider(provider string) bool {
 // predicate even when called before constructing an external checkout request.
 func (s *Store) PaymentOrder(ctx context.Context, userID, orderID string) (Order, error) {
 	var o Order
-	err := s.DB.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status,created_at,paid_at FROM orders WHERE id=$1 AND user_id=$2`, orderID, userID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt)
+	err := s.DB.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,CASE WHEN status='pending' AND expires_at<=clock_timestamp() THEN 'expired' ELSE status END,created_at,paid_at,expires_at,closed_at FROM orders WHERE id=$1 AND user_id=$2`, orderID, userID).Scan(&o.ID, &o.UserID, &o.PlanID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status, &o.CreatedAt, &o.PaidAt, &o.ExpiresAt, &o.ClosedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, ErrNotFound
 	}
@@ -77,14 +77,15 @@ func (s *Store) CreatePayment(ctx context.Context, userID, orderID, provider str
 		return Payment{}, ErrEmailUnverified
 	}
 	var status string
-	err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE`, orderID, userID).Scan(&status)
+	var beforeExpiry bool
+	err = tx.QueryRow(ctx, `SELECT status,expires_at>clock_timestamp() FROM orders WHERE id=$1 AND user_id=$2 FOR NO KEY UPDATE`, orderID, userID).Scan(&status, &beforeExpiry)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Payment{}, ErrNotFound
 	}
 	if err != nil {
 		return Payment{}, err
 	}
-	if status != "pending" {
+	if status != "pending" || !beforeExpiry {
 		return Payment{}, ErrPaymentConflict
 	}
 	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE order_id=$1`, orderID))
@@ -121,7 +122,7 @@ func (s *Store) SavePaymentCheckout(ctx context.Context, id, kind, link string) 
 		return Payment{}, err
 	}
 	defer tx.Rollback(ctx)
-	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR UPDATE`, id))
+	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR NO KEY UPDATE`, id))
 	if err != nil {
 		return Payment{}, err
 	}
@@ -160,7 +161,7 @@ func (s *Store) SettlePayment(ctx context.Context, paymentID, provider, transact
 	if err = settleTx(ctx, tx, provider, transactionID, orderID, userID, amount, currency); err != nil {
 		return err
 	}
-	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR UPDATE`, paymentID))
+	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR NO KEY UPDATE`, paymentID))
 	if err != nil {
 		return err
 	}

@@ -9,10 +9,14 @@ const payment = ref<Payment | null>(null), selected = ref<PaymentMethod['id'] | 
 const busy = ref(false), loading = ref(true), error = ref(''), notice = ref('')
 let mounted = true, announcedPaid = false
 const providerName = computed(() => props.methods.find(m => m.id === payment.value?.provider)?.name || payment.value?.provider || '')
+const now = ref(Date.now())
+const clock = window.setInterval(() => { now.value = Date.now() }, 1000)
+const cannotPay = computed(() => props.order.status === 'expired' || props.order.status === 'closed' || (!!props.order.expires_at && new Date(props.order.expires_at).getTime() <= now.value))
 const canCheck = computed(() => payment.value?.provider === 'alipay' || payment.value?.provider === 'wechat')
 const checkoutURL = computed(() => {
  try {
   const p = payment.value
+  if (cannotPay.value) return ''
   if (!p || !p.checkout_url || p.status === 'paid') return ''
   const url = new URL(p.checkout_url)
   if (url.username || url.password) return ''
@@ -39,6 +43,7 @@ async function action(task: () => Promise<void>) {
  finally { if (mounted) busy.value = false }
 }
 function create() { return action(async () => {
+ if (cannotPay.value) throw new Error('此订单已停止发起付款，请刷新查看实际支付状态。')
  const provider = payment.value?.provider || selected.value
  if (!provider) throw new Error('请选择支付方式。')
  try {
@@ -62,7 +67,7 @@ onMounted(async () => {
  await action(readPayment)
  if (mounted) loading.value = false
 })
-onBeforeUnmount(() => { mounted = false })
+onBeforeUnmount(() => { mounted = false; window.clearInterval(clock) })
 </script>
 
 <template>
@@ -74,6 +79,10 @@ onBeforeUnmount(() => { mounted = false })
   <template v-else-if="payment?.status === 'paid'">
    <NTag type="success" round>支付已确认</NTag>
    <p>套餐权益已开通，可以关闭窗口查看订单和权益。</p>
+  </template>
+  <template v-else-if="cannotPay">
+   <NTag round>{{ order.status === 'closed' ? '订单已关闭' : '订单已超时' }}</NTag>
+   <p class="muted">此订单已停止发起付款。若你已完成付款，可以刷新或核对结果，系统仍会核实有效的付款通知。</p>
   </template>
   <template v-else>
    <template v-if="!payment">

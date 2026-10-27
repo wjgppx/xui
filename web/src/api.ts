@@ -1,6 +1,6 @@
 export interface User { id: string; email: string; role: 'user' | 'admin' | 'support' | 'finance' | 'operator'; email_verified_at: string | null; permissions: string[] }
 export interface Plan { id: string; name: string; description: string; price_minor: number; currency: string; duration_days: number; quota_bytes: number }
-export interface Order extends Omit<Plan, 'name' | 'description'> { user_id: string; plan_id: string; plan_name: string; status: 'pending' | 'paid'; created_at: string; paid_at: string | null }
+export interface Order extends Omit<Plan, 'name' | 'description'> { user_id: string; plan_id: string; plan_name: string; status: 'pending' | 'expired' | 'closed' | 'paid'; created_at: string; paid_at: string | null; expires_at?: string | null; closed_at?: string | null }
 export interface Entitlement { revoked_at?: string | null; id: string; order_id: string; plan_name: string; starts_at: string; ends_at: string; quota_bytes: number; used_bytes: number }
 export interface Overview { users: number; orders: number; paid_minor: number; pending_events: number }
 export interface PaymentMethod { id: 'alipay' | 'wechat' | 'epay_alipay' | 'epay_wechat'; name: string }
@@ -11,3 +11,6 @@ export async function api<T>(path: string, body?: unknown): Promise<T> {
  if (!response.ok) throw new Error(data.error || '请求失败，请稍后再试')
  return data as T
 }
+
+export interface PaymentOperation { id: string; order_id: string; user_email: string; provider: PaymentMethod['id']; status: Payment['status']; amount_minor: number; currency: string; transaction_id?: string | null; created_at: string; paid_at?: string | null; order_status: Order['status']; expires_at?: string | null; reconcile_status?: 'queued' | 'processing' | 'waiting' | 'paid' | 'manual_required' | 'waiting_callback' | null; reconcile_attempts?: number; last_outcome?: string; next_check_at?: string | null }
+export interface PaymentActivity { id: string | number; payment_id?: string | null; order_id?: string | null; provider?: string; source: string; outcome: string; created_at: string }

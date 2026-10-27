@@ -16,6 +16,7 @@ import (
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/mailer"
 	"github.com/wjgppx/xui/internal/payments"
+	"github.com/wjgppx/xui/internal/reconcile"
 	"github.com/wjgppx/xui/internal/store"
 )
 
@@ -120,6 +121,9 @@ func main() {
 		go func() { defer close(mailDone); mailer.Run(ctx, s, sender) }()
 		defer func() { stop(); <-mailDone }()
 	}
+	reconcileDone := make(chan struct{})
+	go func() { defer close(reconcileDone); reconcile.Run(ctx, s, registry, origin) }()
+	defer func() { stop(); <-reconcileDone }()
 	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {

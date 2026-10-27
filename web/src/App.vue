@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NConfigProvider, NInput, NInputNumber, NModal, NTag } from 'naive-ui'
 import { api, type User, type Plan, type Order, type Entitlement, type Overview, type PaymentMethod } from './api'
 import NodeManager from './NodeManager.vue'
@@ -8,8 +8,9 @@ import AccessManager from './AccessManager.vue'
 import AccountSecurity from './AccountSecurity.vue'
 import StaffManager from './StaffManager.vue'
 import PaymentCheckout from './PaymentCheckout.vue'
+const PaymentOperations = defineAsyncComponent(() => import('./PaymentOperations.vue'))
 
-type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff'
+type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments'
 const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<Plan[]>([]), orders = ref<Order[]>([]), entitlements = ref<Entitlement[]>([])
 const paymentMethods = ref<PaymentMethod[]>([]), paymentMethodsError = ref(''), paymentOrder = ref<Order | null>(null)
 const developmentMail = ref(false), verificationRequired = ref(false)
@@ -26,7 +27,16 @@ const usage = (v: number) => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; 
 const money = (v: number) => (v / 100).toFixed(2)
 const gib = (v: number) => (v / 1024 ** 3).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 const date = (v: string) => new Date(v).toLocaleDateString('zh-CN')
-const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号' }
+const now = ref(Date.now())
+const orderClock = window.setInterval(() => { now.value = Date.now() }, 1000)
+onBeforeUnmount(() => window.clearInterval(orderClock))
+const orderStatus = (order: Order): Order['status'] => order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() <= now.value ? 'expired' : order.status
+const orderStatusLabel = (order: Order) => ({ pending: '待支付', expired: '已超时', closed: '已关闭', paid: '已开通' }[orderStatus(order)])
+function closeOrder(order: Order) {
+ if (!window.confirm('仅可关闭尚未发起外部付款的订单。关闭后无法继续使用此订单付款，是否继续？')) return
+ return action(async () => { await api(`/orders/${encodeURIComponent(order.id)}/close`, {}); await personal(); notice.value = '订单已关闭。' })
+}
+const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号', payments: '支付流水' }
 const theme = { common: { primaryColor: '#21766b', primaryColorHover: '#185e55', primaryColorPressed: '#124d46', borderRadius: '10px', fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif' } }
 
 async function personal() {
@@ -81,6 +91,7 @@ function returnedFromPayment() {
 }
 returnedFromPayment()
 function openPayment(order: Order) {
+ if (orderStatus(order) !== 'pending') { notice.value = '此订单已不能继续发起付款，请刷新查看实际状态。'; return }
  if (verificationRequired.value && !user.value?.email_verified_at) { view.value = 'security'; notice.value = '请先验证邮箱，再进行支付。'; return }
  paymentOrder.value = order
 }
@@ -90,7 +101,7 @@ function buy(plan: Plan) {
  if (verificationRequired.value && !user.value.email_verified_at) { view.value = 'security'; notice.value = '请先验证邮箱，再购买套餐。'; return }
  return action(async () => { await api<Order>('/orders', { plan_id: plan.id }); await personal(); view.value = 'orders'; notice.value = '订单已创建，请确认订单后完成支付。' })
 }
-function settle(order: Order) { return action(async () => { await api(`/dev/orders/${order.id}/settle`, {}); await personal(); notice.value = '测试支付已确认，套餐权益已开通。' }) }
+function settle(order: Order) { if (orderStatus(order) !== 'pending') return; return action(async () => { await api(`/dev/orders/${order.id}/settle`, {}); await personal(); notice.value = '测试支付已确认，套餐权益已开通。' }) }
 function createPlan() { return action(async () => { await api('/admin/plans', { id: '', name: planName.value, description: planDescription.value, price_minor: Math.round(planPrice.value * 100), currency: 'CNY', duration_days: planDays.value, quota_bytes: planQuota.value * 1024 ** 3 }); plans.value = await api<Plan[]>('/plans'); planOpen.value = false; notice.value = '新套餐已上架。' }) }
 onMounted(load)
 </script>
@@ -108,10 +119,11 @@ onMounted(load)
      <button v-if="can('orders.read') || can('overview.read') || can('plans.write')" :class="{ selected: view === 'admin' }" @click="view = 'admin'"><span class="nav-icon">⌘</span>运营工作台</button>
      <button v-if="can('nodes.read')" :class="{ selected: view === 'nodes' }" @click="view = 'nodes'"><span class="nav-icon">◎</span>节点管理</button>
      <button v-if="can('access.read')" :class="{ selected: view === 'access' }" @click="view = 'access'"><span class="nav-icon">▧</span>权限管理</button>
+     <button v-if="can('payments.read')" :class="{ selected: view === 'payments' }" @click="view = 'payments'"><span class="nav-icon">¥</span>支付流水</button>
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.8</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.9</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
@@ -122,6 +134,7 @@ onMounted(load)
      <div v-if="loading" class="loading">正在准备你的空间…</div>
      <template v-else>
       <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
+      <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" />
       <StaffManager v-if="view === 'staff' && can('users.read')" :can-manage-roles="can('users.roles')" />
       <NodeManager v-if="view === 'nodes' && can('nodes.read')" />
       <AccessManager v-if="view === 'access' && can('access.read')" />
@@ -129,7 +142,7 @@ onMounted(load)
       <template v-if="view === 'overview'">
        <div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h1>{{ user ? '欢迎回来。' : '连接，从这里开始。' }}</h1><p>你的套餐、用量和订单，一目了然。</p></div><span class="date-pill">{{ new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }) }}</span></div>
        <section class="hero"><div><span class="hero-label">YOUR NEXT CONNECTION</span><h2>为工作与生活，<br/>留出更多可能。</h2><p>选择适合自己的套餐，<br class="mobile-break"/>在一个空间管理每次连接。</p><NButton color="#e5efb7" text-color="#183b35" size="large" @click="view = 'plans'">探索套餐 <span class="button-arrow">↗</span></NButton></div><div class="orbit-art" aria-hidden="true"><div class="orbit one"></div><div class="orbit two"></div><div class="orbit three"></div><span class="orbit-core">x</span><span class="satellite s1"></span><span class="satellite s2"></span><span class="orbit-caption">A LITTLE MORE POSSIBILITY.</span></div></section>
-       <div class="stats-grid"><article class="stat"><p>当前套餐 <span>◈</span></p><h3>{{ active?.plan_name || '尚未开通' }}</h3><small>{{ active ? `有效期至 ${date(active.ends_at)}` : '找到适合你的连接方案' }}</small></article><article class="stat"><p>已入账用量 <span>↗</span></p><h3>{{ active ? usage(active.used_bytes) : '—' }}</h3><small>{{ active ? `总额度 ${gib(active.quota_bytes)} GiB` : '开通后查看当前周期用量' }}</small></article><article class="stat"><p>我的订单 <span>≡</span></p><h3>{{ orders.length }} <em>笔</em></h3><small>{{ orders.filter(o => o.status === 'pending').length }} 笔等待支付</small></article></div>
+       <div class="stats-grid"><article class="stat"><p>当前套餐 <span>◈</span></p><h3>{{ active?.plan_name || '尚未开通' }}</h3><small>{{ active ? `有效期至 ${date(active.ends_at)}` : '找到适合你的连接方案' }}</small></article><article class="stat"><p>已入账用量 <span>↗</span></p><h3>{{ active ? usage(active.used_bytes) : '—' }}</h3><small>{{ active ? `总额度 ${gib(active.quota_bytes)} GiB` : '开通后查看当前周期用量' }}</small></article><article class="stat"><p>我的订单 <span>≡</span></p><h3>{{ orders.length }} <em>笔</em></h3><small>{{ orders.filter(o => orderStatus(o) === 'pending').length }} 笔等待支付</small></article></div>
        <div class="detail-grid"><section class="panel"><div class="section-title"><h2>套餐权益</h2><NButton v-if="user" size="small" :loading="busy" @click="action(personal)">刷新用量</NButton><span v-else class="subtle">SUBSCRIPTION</span></div><template v-if="active"><div class="quota-row"><strong>{{ active.plan_name }}</strong><span>{{ usage(active.used_bytes) }} / {{ gib(active.quota_bytes) }} GiB</span></div><div class="progress-track" role="progressbar" aria-label="当前权益已入账用量" :aria-valuenow="Math.round(usedPercent)" aria-valuemin="0" aria-valuemax="100"><div :style="{ width: usedPercent + '%' }"></div></div><p class="muted">已入账用量包含上行与下行，采样和上报存在延迟。</p><p v-if="active.used_bytes > active.quota_bytes" class="muted">超出已购额度 {{ usage(active.used_bytes - active.quota_bytes) }}；已发生用量按实记录。</p><p class="muted">{{ date(active.starts_at) }} — {{ date(active.ends_at) }}</p><p v-if="future.length" class="muted">还有 {{ future.length }} 个已购买的后续周期。</p></template><div v-else class="empty-state"><span class="empty-symbol">◇</span><h3>你的旅程，即将开始</h3><p>{{ user ? '选择一个套餐，开通属于你的连接空间。' : '创建账号，开始管理你的套餐和订单。' }}</p><NButton @click="user ? view = 'plans' : openAuth(true)">{{ user ? '查看套餐' : '创建账号' }}</NButton></div></section><section class="panel getting-started"><div class="section-title"><h2>开始使用</h2><span>↗</span></div><div class="step"><span>01</span><div><h4>找到适合你的套餐</h4><p>按所需额度和使用周期选择。</p></div></div><div class="step"><span>02</span><div><h4>确认订单与开通</h4><p>订单确认后，权益自动记录。</p></div></div><div class="step"><span>03</span><div><h4>接入你的设备</h4><p>在“我的订阅”获取客户端配置。</p></div></div></section></div>
       </template>
       <template v-if="view === 'plans'">
@@ -140,12 +153,12 @@ onMounted(load)
       <template v-if="view === 'orders'">
        <div class="page-heading"><div><p class="eyebrow">YOUR ORDERS</p><h1>每一笔，都有记录。</h1><p>查看订单进度与已开通的套餐。</p></div><div class="payment-actions-inline"><NButton v-if="user" :loading="busy" @click="action(async () => { await personal(); await loadPaymentMethods() })">刷新订单</NButton><NButton @click="view = 'plans'">探索套餐 ↗</NButton></div></div>
        <p v-if="paymentMethodsError" role="alert" class="muted">{{ paymentMethodsError }}</p>
-       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="o.status === 'paid' ? 'success' : 'warning'">{{ o.status === 'paid' ? '已开通' : '待支付' }}</NTag></td><td><div v-if="o.status === 'pending'" class="payment-actions-inline"><NButton v-if="paymentMethods.length" size="small" type="primary" :disabled="busy" @click="openPayment(o)">去支付</NButton><NButton v-if="development" size="small" :type="paymentMethods.length ? 'default' : 'primary'" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-if="!paymentMethods.length && !development" class="muted">{{ paymentMethodsError ? '支付渠道暂不可用' : '支付渠道待配置' }}</span></div><span v-else class="muted">已完成</span></td></tr></tbody></table></div></section>
+       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id" :data-order-id="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small><small v-if="o.expires_at && orderStatus(o) === 'pending'" class="order-id">付款截止 {{ new Date(o.expires_at).toLocaleString('zh-CN') }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="orderStatus(o) === 'paid' ? 'success' : orderStatus(o) === 'pending' ? 'warning' : 'default'">{{ orderStatusLabel(o) }}</NTag></td><td><div class="payment-actions-inline"><template v-if="orderStatus(o) === 'pending'"><NButton v-if="paymentMethods.length" size="small" type="primary" :disabled="busy" @click="openPayment(o)">去支付</NButton><NButton v-if="development" size="small" :type="paymentMethods.length ? 'default' : 'primary'" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-if="!paymentMethods.length && !development" class="muted">{{ paymentMethodsError ? '支付渠道暂不可用' : '支付渠道待配置' }}</span></template><NButton v-if="orderStatus(o) === 'pending' || orderStatus(o) === 'expired'" size="small" :disabled="busy" title="仅关闭尚未发起外部付款的订单" @click="closeOrder(o)">关闭订单</NButton><span v-else class="muted">{{ o.status === 'paid' ? '已完成' : '订单已关闭' }}</span></div><p v-if="orderStatus(o) === 'expired'" class="muted order-expiry-note">已停止发起付款；已付款的订单仍会核实结果。</p></td></tr></tbody></table></div></section>
       </template>
       <template v-if="view === 'admin' && (can('orders.read') || can('overview.read') || can('plans.write'))">
        <div class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>运营工作台</h1><p>查看平台业务记录，管理当前在售套餐。</p></div><NButton v-if="can('plans.write')" type="primary" @click="planOpen = true">＋ 新建套餐</NButton></div>
        <div class="stats-grid" v-if="overview"><article class="stat"><p>注册用户</p><h3>{{ overview.users }}</h3></article><article class="stat"><p>订单数量</p><h3>{{ overview.orders }}</h3></article><article class="stat"><p>{{ development ? '已确认测试金额' : '已确认订单金额' }}</p><h3>¥{{ money(overview.paid_minor) }}</h3></article></div>
-       <section v-if="can('orders.read')" class="panel"><div class="section-title"><h2>最近订单</h2><span class="subtle">最近 100 条</span></div><div class="table-wrap"><table><thead><tr><th>订单</th><th>用户编号</th><th>套餐</th><th>金额</th><th>状态</th></tr></thead><tbody><tr v-for="o in allOrders" :key="o.id"><td>{{ o.id.slice(0, 12) }}</td><td>{{ o.user_id.slice(0, 12) }}</td><td>{{ o.plan_name }}</td><td>¥{{ money(o.price_minor) }}</td><td>{{ o.status === 'paid' ? '已开通' : '待支付' }}</td></tr></tbody></table><p v-if="!allOrders.length" class="muted">暂无订单。</p></div></section>
+       <section v-if="can('orders.read')" class="panel"><div class="section-title"><h2>最近订单</h2><span class="subtle">最近 100 条</span></div><div class="table-wrap"><table><thead><tr><th>订单</th><th>用户编号</th><th>套餐</th><th>金额</th><th>状态</th></tr></thead><tbody><tr v-for="o in allOrders" :key="o.id"><td>{{ o.id.slice(0, 12) }}</td><td>{{ o.user_id.slice(0, 12) }}</td><td>{{ o.plan_name }}</td><td>¥{{ money(o.price_minor) }}</td><td>{{ orderStatusLabel(o) }}</td></tr></tbody></table><p v-if="!allOrders.length" class="muted">暂无订单。</p></div></section>
       </template>
      </template>
      <footer class="page-footer"><span>© {{ new Date().getFullYear() }} xui. 用心连接。</span><span>让每一步，都清晰。</span></footer>
@@ -161,6 +174,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.order-expiry-note{font-size:12px;line-height:1.6;max-width:260px}
 .payment-actions-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 @media(min-width:761px){.sidebar.admin-sidebar{overflow-y:auto}}
 @media(min-width:761px) and (max-height:950px){.sidebar.admin-sidebar .sidebar-note{display:none}.sidebar.admin-sidebar .sidebar-footer{margin-top:auto}}

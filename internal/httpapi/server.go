@@ -83,6 +83,11 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/payments/notify/{provider}", s.paymentNotify)
 	m.HandleFunc("GET /api/v1/orders", s.orders)
 	m.HandleFunc("POST /api/v1/orders", s.createOrder)
+	m.HandleFunc("POST /api/v1/orders/{id}/close", s.closeOrder)
+	m.HandleFunc("GET /api/v1/admin/payments", s.adminPayments)
+	m.HandleFunc("GET /api/v1/admin/payment-activity", s.adminRecentPaymentActivity)
+	m.HandleFunc("GET /api/v1/admin/payments/{id}/activity", s.adminPaymentActivity)
+	m.HandleFunc("POST /api/v1/admin/payments/{id}/retry", s.retryPaymentReconciliation)
 	m.HandleFunc("GET /api/v1/me/entitlements", s.entitlements)
 	m.HandleFunc("POST /api/v1/dev/orders/{id}/settle", s.devSettle)
 	m.HandleFunc("GET /api/v1/admin/overview", s.overview)
@@ -402,9 +407,10 @@ func (s *Server) devSettle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var price int64
-	var currency string
+	var currency, status string
+	var expires time.Time
 	id := r.PathValue("id")
-	err := s.Store.DB.QueryRow(r.Context(), `SELECT price_minor,currency FROM orders WHERE id=$1 AND user_id=$2`, id, u.ID).Scan(&price, &currency)
+	err := s.Store.DB.QueryRow(r.Context(), `SELECT price_minor,currency,status,expires_at FROM orders WHERE id=$1 AND user_id=$2`, id, u.ID).Scan(&price, &currency, &status, &expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 404, "订单不存在")
 		return
@@ -413,7 +419,15 @@ func (s *Server) devSettle(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	if (status != "pending" && status != "paid") || (status == "pending" && !expires.After(time.Now())) {
+		fail(w, 409, "订单已超时或已关闭")
+		return
+	}
 	err = s.Store.Settle(r.Context(), "development", "dev:"+id, id, u.ID, price, currency)
+	if errors.Is(err, store.ErrPaymentConflict) {
+		fail(w, 409, "订单支付状态不允许此操作")
+		return
+	}
 	if err != nil {
 		serverError(w, err)
 		return
