@@ -1,0 +1,59 @@
+name: Verify platform
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
+        env:
+          POSTGRES_USER: xui
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: xui
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U xui" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      CGO_ENABLED: "1"
+      DATABASE_URL: postgres://xui:ci-only-password@127.0.0.1:5432/xui?sslmode=disable
+      TEST_DATABASE_URL: postgres://xui:ci-only-password@127.0.0.1:5432/xui?sslmode=disable
+      APP_MODE: development
+      PUBLIC_ORIGIN: http://127.0.0.1:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: go test -race -count=1 ./...
+      - run: go vet ./...
+      - name: Verify TLS, metering and subscription clients
+        env:
+          XUI_TOOLS_DIR: ${{ runner.temp }}/xui-tools
+          XUI_XRAY_BIN: ${{ runner.temp }}/xui-tools/xray-26.10.21/xray
+          XUI_MIHOMO_BIN: ${{ runner.temp }}/xui-tools/mihomo-1.19.15/mihomo
+        run: |
+          python3 scripts/install-xray.py
+          python3 scripts/install-mihomo.py
+          bash scripts/test-xray.sh
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Start API and web
+        run: |
+          go build -o /tmp/xui-control ./cmd/control
+          go build -o bin/xui-agent ./cmd/agent
+          /tmp/xui-control > /tmp/xui-api.log 2>&1 &
+          npm --prefix web run dev > /tmp/xui-web.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz && curl -fsS http://127.0.0.1:5173/ > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/xui-api.log /tmp/xui-web.log
+          exit 1
+      - run: npm run test:e2e
+        working-directory: web

@@ -1,0 +1,19 @@
+name: xui
+services:
+  db:
+    image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
+    environment:
+      POSTGRES_USER: xui
+      POSTGRES_DB: xui
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/init-dev.py first}
+    ports:
+      - "127.0.0.1:${DB_PORT:-54329}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xui -d xui"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  postgres-data:

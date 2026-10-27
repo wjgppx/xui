@@ -1,0 +1,3620 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "XUI platform and node API",
+    "version": "0.7.0",
+    "description": "Development platform: accounts with email verification and password recovery, fixed staff roles, PostgreSQL shared rate limits, verified STARTTLS account mail, plans, development settlement, TLS nodes, durable metering, subscriptions, purchase-snapshotted node-group access and transactional business-event delivery. Real payments and production operations acceptance are not implemented."
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Database readiness",
+        "operationId": "get_healthz",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "summary": "Development feature availability",
+        "operationId": "get_api_v1_config",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Configuration"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "summary": "register",
+        "operationId": "post_api_v1_auth_register",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          }
+        },
+        "description": "Creates an unverified account and a session. Returns computed permissions. Direct peer IP shares20/minute with login."
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "login",
+        "operationId": "post_api_v1_auth_login",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          }
+        },
+        "description": "Direct peer IP shared fixed-window limit: registration and login combined20 requests/minute. Forwarded headers are ignored. Rate-limit backend failures do not permit access."
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "summary": "Revoke session",
+        "operationId": "post_api_v1_auth_logout",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "summary": "Current user",
+        "operationId": "get_api_v1_me",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "summary": "Active plans",
+        "operationId": "get_api_v1_plans",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Plan"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "summary": "Create immutable purchase snapshot",
+        "operationId": "post_api_v1_orders",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderCreate"
+              }
+            }
+          }
+        },
+        "description": "Production requires a verified account email. Development permits unverified accounts for local workflows."
+      },
+      "get": {
+        "summary": "Own latest 100 orders",
+        "operationId": "get_api_v1_orders",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Order"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/entitlements": {
+      "get": {
+        "summary": "Own current, future and past entitlement periods",
+        "operationId": "get_api_v1_me_entitlements",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Entitlement"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/orders/{id}/settle": {
+      "post": {
+        "summary": "Development only: settle own order; production returns 404",
+        "operationId": "post_api_v1_dev_orders_id_settle",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/overview": {
+      "get": {
+        "summary": "Staff: platform counters",
+        "operationId": "get_api_v1_admin_overview",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-required-permission": "overview.read",
+        "description": "Requires permission overview.read. Production also requires a verified account email."
+      }
+    },
+    "/api/v1/admin/orders": {
+      "get": {
+        "summary": "Staff: latest 100 orders",
+        "operationId": "get_api_v1_admin_orders",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Order"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-required-permission": "orders.read",
+        "description": "Requires permission orders.read. Production also requires a verified account email."
+      }
+    },
+    "/api/v1/admin/plans": {
+      "post": {
+        "summary": "Staff: create active plan and audit",
+        "operationId": "post_api_v1_admin_plans",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanCreate"
+              }
+            }
+          }
+        },
+        "x-required-permission": "plans.write",
+        "description": "Requires permission plans.write. Production also requires a verified account email."
+      }
+    },
+    "/api/v1/admin/nodes": {
+      "get": {
+        "summary": "Staff: list latest 100 nodes",
+        "operationId": "get_api_v1_admin_nodes",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Node"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-required-permission": "nodes.read",
+        "description": "Requires permission nodes.read. Production also requires a verified account email."
+      },
+      "post": {
+        "summary": "Staff: create node and enrollment token",
+        "operationId": "post_api_v1_admin_nodes",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeEnrollment"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeCreate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "x-required-permission": "nodes.write",
+        "description": "Requires permission nodes.write. Production also requires a verified account email."
+      }
+    },
+    "/api/v1/admin/nodes/{id}/enrollment": {
+      "post": {
+        "summary": "Staff: replace identity and issue enrollment token",
+        "operationId": "post_api_v1_admin_nodes_id_enrollment",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeEnrollment"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Immediately invalidates old enrollment and Agent credentials, clears heartbeat and observed version, and permits a revoked node to enroll again. Requires permission nodes.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-required-permission": "nodes.write"
+      }
+    },
+    "/api/v1/admin/nodes/{id}/revoke": {
+      "post": {
+        "summary": "Staff: revoke node identity",
+        "operationId": "post_api_v1_admin_nodes_id_revoke",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Rejects subsequent control requests. Does not terminate existing proxy connections. Requires permission nodes.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-required-permission": "nodes.write"
+      }
+    },
+    "/agent/v1/enroll": {
+      "post": {
+        "summary": "Enroll a node using its temporary token",
+        "operationId": "post_agent_v1_enroll",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEnrollResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "No browser Origin required. Within token lifetime, retry with the same Agent credential is idempotent; reuse with a different credential returns 409. Invalid, expired or revoked enrollment returns 401. Rate limited.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentEnrollRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/desired-state": {
+      "get": {
+        "summary": "Read authenticated node’s entitlement-filtered desired state and authorization lease",
+        "operationId": "get_agent_v1_desired_state",
+        "security": [
+          {
+            "nodeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesiredState"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Active current periods only; future, expired and exhausted periods are excluded. A stable content digest keeps versions unchanged for lease-only renewals; authorization changes advance the version."
+      }
+    },
+    "/agent/v1/heartbeat": {
+      "post": {
+        "summary": "Report configuration observation and liveness",
+        "operationId": "post_agent_v1_heartbeat",
+        "security": [
+          {
+            "nodeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "No browser Origin required. Invalid identity returns 401; stale/ahead revision or concurrent identity revocation returns 409. Does not certify proxy readiness.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Heartbeat"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/nodes/{id}/configuration": {
+      "get": {
+        "summary": "Staff: read node configuration without credentials",
+        "operationId": "get_admin_node_configuration",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeConfiguration"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-required-permission": "nodes.read",
+        "description": "Requires permission nodes.read. Production also requires a verified account email."
+      },
+      "post": {
+        "summary": "Staff: replace TLS bindings and explicit account allowlist",
+        "operationId": "post_admin_node_configuration",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeConfiguration"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Configuration is audited and version checked. Invalid users, duplicate IDs/ports, unsupported protocols or invalid certificate references are rejected atomically. Valid writes advance desired revision and mark application pending. Requires permission nodes.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeConfiguration"
+              }
+            }
+          }
+        },
+        "x-required-permission": "nodes.write"
+      }
+    },
+    "/agent/v1/applied-state": {
+      "post": {
+        "summary": "Report actual Xray configuration application result",
+        "operationId": "post_agent_applied_state",
+        "security": [
+          {
+            "nodeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Uses node Bearer identity, no browser Origin. 409 on stale/unobserved revision or revoked identity. Failed reports preserve the previously applied revision and cannot mark the new snapshot applied.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppliedState"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/usage-batches": {
+      "post": {
+        "summary": "Commit immutable usage evidence and charge its original entitlement periods",
+        "operationId": "post_agent_usage_batches",
+        "security": [
+          {
+            "nodeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageAck"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fields, counter arithmetic, or sampling interval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or revoked node identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Binding/user/period was not historically authorized for this node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Batch content conflict, reused core sequence, or debit overflow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Node Bearer identity only, no browser Origin. Same node/batch ID and canonical content returns the same acknowledgement without charging again. Changed content or reuse of node/core/sequence returns 409. Unissued historical ownership returns 403. All items, raw up+down byte debits and evidence commit in one transaction; overage is recorded rather than clamped. Historical expired periods are accepted only within issued authorization history, with 30 seconds of clock/measurement tolerance. Revoked identities return 401. Agent must verify acknowledged batch ID and digest before deleting its local outbox entry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageBatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscription/rotate": {
+      "post": {
+        "summary": "Generate a replacement subscription token; old URL immediately invalid",
+        "operationId": "post_api_v1_me_subscription_rotate",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionIssued"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Replaces own subscription token atomically with audit. Only the SHA-256 digest is stored. Old token URLs fail after rotation; already imported proxy credentials remain unchanged.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscription/revoke": {
+      "post": {
+        "summary": "Revoke only subscription access; imported proxy credentials remain valid",
+        "operationId": "post_api_v1_me_subscription_revoke",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Revokes own subscription download token and records audit. Imported proxy credentials remain valid until separately rotated or authorization removed.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/proxy-credentials/rotate": {
+      "post": {
+        "summary": "Rotate own proxy credentials across all granted nodes",
+        "operationId": "post_api_v1_me_proxy_credentials_rotate",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Rotates own VLESS/Trojan credentials across granted nodes atomically, advances desired node revisions and records audit. Other users and subscription token remain unchanged. Old credentials stop working after node reconciliation.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscription": {
+      "get": {
+        "summary": "Read own subscription status without the token",
+        "operationId": "get_me_subscription",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/subscriptions/{token}": {
+      "get": {
+        "summary": "Get authorized published endpoints using a subscription token",
+        "operationId": "get_public_subscription",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Bearer URL without Web Cookie. Only currently active non-revoked unexhausted entitlements, manual allowlist or purchased enabled node-group membership, opt-in publication, fresh heartbeat, applied revision and unexpired issued authorization are eligible. Pending/stale/revoked nodes excluded. URI/Base64 may be empty; structured formats reject traffic when empty. No direct fallback. Cache-Control:no-store and Referrer-Policy:no-referrer. Per-IP limit60/min; invalid or revoked token401.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "uri",
+                "base64",
+                "clash",
+                "xray"
+              ],
+              "default": "base64"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/access": {
+      "get": {
+        "summary": "Staff: read node groups, nodes and versioned plan mappings",
+        "operationId": "get_api_v1_admin_access",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessOverview"
+                }
+              }
+            }
+          }
+        },
+        "description": "Operational group membership and future-order plan catalog mappings. Existing orders retain their group snapshot. Requires permission access.read. Production also requires a verified account email.",
+        "x-required-permission": "access.read"
+      }
+    },
+    "/api/v1/admin/node-groups": {
+      "post": {
+        "summary": "Staff: create an operational node group",
+        "operationId": "post_api_v1_admin_node_groups",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGroup"
+                }
+              }
+            }
+          }
+        },
+        "description": "Validates all member nodes; creates group, membership, audit and node_group.changed event atomically. Empty membership is allowed. Requires permission access.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeGroupCreate"
+              }
+            }
+          }
+        },
+        "x-required-permission": "access.write"
+      }
+    },
+    "/api/v1/admin/node-groups/{id}": {
+      "post": {
+        "summary": "Staff: replace group members and enabled state",
+        "operationId": "post_api_v1_admin_node_groups_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGroup"
+                }
+              }
+            }
+          }
+        },
+        "description": "Optimistic revision check409. Changes affect current purchased-group entitlements in plan mode. Event targets old/new member union; manual allowlists remain independent. Requires permission access.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeGroupUpdate"
+              }
+            }
+          }
+        },
+        "x-required-permission": "access.write"
+      }
+    },
+    "/api/v1/admin/plans/{id}/node-groups": {
+      "post": {
+        "summary": "Staff: replace groups for future orders",
+        "operationId": "post_api_v1_admin_plans_id_node_groups",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionOK"
+                }
+              }
+            }
+          }
+        },
+        "description": "Plan row locked against order creation. Validates group IDs and current access revision. Existing paid and unpaid orders retain their captured groups. Audit and plan.access_changed event commit atomically. Requires permission access.write. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanNodeGroupsUpdate"
+              }
+            }
+          }
+        },
+        "x-required-permission": "access.write"
+      }
+    },
+    "/api/v1/admin/events": {
+      "get": {
+        "summary": "Staff: list latest100 business events",
+        "operationId": "get_api_v1_admin_events",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BusinessEvent"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Processed means control-plane delivery completed. Poll node read/applied versions separately. Failed events back off, dead-letter after5 failures. Requires permission events.read. Production also requires a verified account email.",
+        "x-required-permission": "events.read"
+      }
+    },
+    "/api/v1/admin/events/{id}/retry": {
+      "post": {
+        "summary": "Staff: requeue a failed unfinished event",
+        "operationId": "post_api_v1_admin_events_id_retry",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          }
+        },
+        "description": "Clears current failure count/error/dead-letter marker and makes event ready now; records audit. Processed events or ordinary never-failed pending events409. Missing event404. Requires permission events.retry. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        },
+        "x-required-permission": "events.retry"
+      }
+    },
+    "/api/v1/admin/entitlements/{id}/revoke": {
+      "post": {
+        "summary": "Staff: revoke an entitlement period",
+        "operationId": "post_api_v1_admin_entitlements_id_revoke",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          }
+        },
+        "description": "Revocation excludes both manual and plan authorization. Business state, audit and entitlement.revoked event commit atomically. Repeated revoke200 without duplicate event. Does not refund or reschedule periods; no restore endpoint. Requires permission entitlements.revoke. Production also requires a verified account email.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        },
+        "x-required-permission": "entitlements.revoke"
+      }
+    },
+    "/api/v1/me/email-verification": {
+      "post": {
+        "summary": "Request account email verification",
+        "description": "Authenticated. Empty JSON body. Returns 202 after queueing; already verified returns 200. Verify token expires after24 hours. Replaces earlier unused verification token and cancels pending old mail.",
+        "operationId": "post_api_v1_me_email_verification",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Account is already verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/email/confirm": {
+      "post": {
+        "summary": "Consume a one-time email verification token",
+        "description": "Explicit submission only. Returns400 for invalid, expired or consumed tokens. Does not create a session.",
+        "operationId": "post_api_v1_auth_email_confirm",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountToken"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password/forgot": {
+      "post": {
+        "summary": "Request password recovery",
+        "description": "For any syntactically valid email, known and unknown accounts have identical202 status and body. Known accounts queue a30-minute, single-use reset token. Rate limited by direct peer IP and normalized email.",
+        "operationId": "post_api_v1_auth_password_forgot",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountEmail"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password/reset": {
+      "post": {
+        "summary": "Reset password and revoke all account sessions",
+        "description": "Valid reset token required. Password is12–72 UTF-8 bytes. Invalid, consumed or expired token returns400. Increments account security version, revokes sessions and all unused reset tokens. Does not log in or mark email verified.",
+        "operationId": "post_api_v1_auth_password_reset",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/password": {
+      "post": {
+        "summary": "Change password and revoke all account sessions",
+        "description": "Requires current password and a different new password. Revokes all sessions and unused reset tokens. Caller must log in again.",
+        "operationId": "post_api_v1_me_password",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/development-mail": {
+      "get": {
+        "summary": "Development only: own active account mail",
+        "description": "Authenticated current mailbox only, latest10 pending messages whose token is active. Production returns404; development anonymous request returns401. Response includes sensitive test links.",
+        "operationId": "get_api_v1_me_development_mail",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DevelopmentMail"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "summary": "Staff: latest100 accounts",
+        "description": "Requires users.read (admin or support). Includes no password hashes, session or account tokens. Requires permission users.read. Production also requires a verified account email.",
+        "operationId": "get_api_v1_admin_users",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffUser"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-required-permission": "users.read"
+      }
+    },
+    "/api/v1/admin/users/{id}/role": {
+      "post": {
+        "summary": "Admin: change an existing account role",
+        "description": "Requires users.roles. Role changes invalidate all target sessions and create an audit record. Browser cannot demote its own administrator or the final administrator;409 on either conflict. Unknown target404. Requires permission users.roles. Production also requires a verified account email.",
+        "operationId": "post_api_v1_admin_users_id_role",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleChange"
+              }
+            }
+          }
+        },
+        "x-required-permission": "users.roles"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "xui_session"
+      },
+      "nodeBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "64-character hex credential",
+        "description": "Independent node identity. Does not grant access to Web APIs."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Credentials": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 72
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin",
+              "support",
+              "finance",
+              "operator"
+            ]
+          },
+          "email_verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Server-computed permissions used for staff navigation; each request is still authorized independently."
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "email_verified_at",
+          "permissions"
+        ]
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "duration_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "price_minor",
+          "currency",
+          "duration_days",
+          "quota_bytes"
+        ]
+      },
+      "PlanCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "duration_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "price_minor",
+          "currency",
+          "duration_days",
+          "quota_bytes"
+        ]
+      },
+      "OrderCreate": {
+        "type": "object",
+        "properties": {
+          "plan_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id"
+        ]
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "price_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "duration_days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "plan_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "price_minor",
+          "currency",
+          "duration_days",
+          "quota_bytes",
+          "user_id",
+          "plan_id",
+          "plan_name",
+          "status",
+          "created_at",
+          "paid_at"
+        ]
+      },
+      "Entitlement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "plan_name": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "used_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "plan_name",
+          "starts_at",
+          "ends_at",
+          "quota_bytes",
+          "used_bytes",
+          "revoked_at"
+        ]
+      },
+      "Overview": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "orders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paid_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending_events": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "users",
+          "orders",
+          "paid_minor",
+          "pending_events"
+        ]
+      },
+      "OK": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "Configuration": {
+        "type": "object",
+        "properties": {
+          "development_payments": {
+            "type": "boolean"
+          },
+          "development_mail": {
+            "type": "boolean"
+          },
+          "email_verification_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "development_payments",
+          "development_mail",
+          "email_verification_required"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enrolled": {
+            "type": "boolean"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "desired_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "observed_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "applied_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "apply_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "failed"
+            ]
+          },
+          "apply_error": {
+            "type": "string"
+          },
+          "core_instance_id": {
+            "type": "string"
+          },
+          "applied_reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enrolled",
+          "revoked",
+          "desired_revision",
+          "observed_revision",
+          "agent_version",
+          "last_seen_at",
+          "created_at",
+          "applied_revision",
+          "apply_status",
+          "apply_error",
+          "core_instance_id",
+          "applied_reported_at"
+        ]
+      },
+      "NodeCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Trimmed nonempty node name, at most 100 UTF-8 bytes."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "NodeEnrollment": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "enrollment_token": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Only returned on creation/rotation. Expires in 15 minutes."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "node_id",
+          "enrollment_token",
+          "expires_at"
+        ]
+      },
+      "AgentEnrollRequest": {
+        "type": "object",
+        "properties": {
+          "enrollment_token": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "writeOnly": true
+          },
+          "agent_token": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "writeOnly": true,
+            "description": "Random client-generated credential. Persist privately before enrollment for lost-response recovery."
+          }
+        },
+        "required": [
+          "enrollment_token",
+          "agent_token"
+        ]
+      },
+      "AgentEnrollResponse": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ]
+      },
+      "DesiredState": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "bindings": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/Binding"
+            }
+          },
+          "lease_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "No later than 60 seconds from snapshot creation or earliest authorized entitlement end. Agent kills its proxy when this lease expires without renewal."
+          }
+        },
+        "required": [
+          "schema_version",
+          "node_id",
+          "revision",
+          "bindings",
+          "lease_expires_at"
+        ]
+      },
+      "Heartbeat": {
+        "type": "object",
+        "properties": {
+          "agent_version": {
+            "type": "string",
+            "minLength": 1,
+            "description": "At most 64 UTF-8 bytes."
+          },
+          "observed_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Version read by the Agent, not an assertion that a proxy core applied it. Must be monotonic and no higher than desired_revision."
+          }
+        },
+        "required": [
+          "agent_version",
+          "observed_revision"
+        ]
+      },
+      "BindingConfig": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "vless",
+              "trojan"
+            ]
+          },
+          "listen": {
+            "type": "string",
+            "description": "Literal IPv4/IPv6 listen address."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 65535
+          },
+          "server_name": {
+            "type": "string",
+            "description": "Certificate SAN hostname; verified by the Agent."
+          },
+          "certificate": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$",
+            "description": "Local certificate basename. Reads <reference>.crt and <reference>.key from operator-configured certificate directory; no private keys in control protocol."
+          },
+          "users": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "email"
+            },
+            "description": "Manual-mode registered-account allowlist. Must be [] in plan mode. Current non-revoked, unexhausted entitlements are required in either mode. Production additionally requires verified account email."
+          },
+          "public_host": {
+            "type": "string",
+            "default": "",
+            "description": "Opt-in subscription destination hostname or literal IP; not the listen address. Empty with public_port=0 means unpublished."
+          },
+          "public_port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "default": 0,
+            "description": "Client-facing destination port, supports external TLS/LB port 443. Must accompany public_host."
+          },
+          "access_mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "manual",
+              "plan"
+            ],
+            "default": "manual",
+            "description": "Missing/empty preserves manual allowlist. Plan mode derives active users from the purchased entitlement group snapshot and current enabled group membership; users must be []. Each mode still caps effective users at100."
+          }
+        },
+        "required": [
+          "id",
+          "protocol",
+          "listen",
+          "port",
+          "server_name",
+          "certificate",
+          "users"
+        ],
+        "additionalProperties": false
+      },
+      "NodeConfiguration": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "GET returns current desired revision; POST requires that exact revision or returns 409."
+          },
+          "bindings": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/BindingConfig"
+            },
+            "description": "Complete replacement. Empty list stops the proxy. IDs and ports must be unique within the node."
+          }
+        },
+        "required": [
+          "revision",
+          "bindings"
+        ],
+        "additionalProperties": false
+      },
+      "ProxyUser": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "entitlement_period_id": {
+            "type": "string"
+          },
+          "credential": {
+            "type": "string",
+            "description": "VLESS UUID or Trojan random hex secret. Only returned to the authenticated node."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "user_id",
+          "entitlement_period_id",
+          "credential",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "Binding": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "vless",
+              "trojan"
+            ]
+          },
+          "listen": {
+            "type": "string",
+            "description": "Literal IPv4/IPv6 listen address."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 65535
+          },
+          "server_name": {
+            "type": "string",
+            "description": "Certificate SAN hostname; verified by the Agent."
+          },
+          "certificate": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$",
+            "description": "Local certificate basename. Reads <reference>.crt and <reference>.key from operator-configured certificate directory; no private keys in control protocol."
+          },
+          "clients": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ProxyUser"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "protocol",
+          "listen",
+          "port",
+          "server_name",
+          "certificate",
+          "clients"
+        ],
+        "additionalProperties": false
+      },
+      "AppliedState": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "failed"
+            ]
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "",
+              "config_rejected",
+              "start_failed",
+              "lease_invalid",
+              "runtime_unavailable",
+              "meter_unavailable"
+            ]
+          },
+          "instance_id": {
+            "type": "string",
+            "description": "Unique core process instance on success; stopped for empty applied configuration; empty on failure."
+          }
+        },
+        "required": [
+          "revision",
+          "status",
+          "error_code",
+          "instance_id"
+        ],
+        "additionalProperties": false,
+        "description": "Applied requires empty error_code and a valid instance_id. Failed requires a nonempty error_code and empty instance_id. Only the current desired revision already observed by the node is accepted."
+      },
+      "UsageItem": {
+        "type": "object",
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$"
+          },
+          "user_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "entitlement_period_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "uplink_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "downlink_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "required": [
+          "binding_id",
+          "user_id",
+          "entitlement_period_id",
+          "uplink_bytes",
+          "downlink_bytes"
+        ],
+        "additionalProperties": false,
+        "description": "Delta raw bytes attributed to one issued binding/user/entitlement. At least one direction must be positive; no duplicate attribution tuple within a batch. All additions must fit signed int64."
+      },
+      "UsageBatch": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "core_instance_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/UsageItem"
+            }
+          }
+        },
+        "required": [
+          "batch_id",
+          "core_instance_id",
+          "sequence",
+          "started_at",
+          "ended_at",
+          "items"
+        ],
+        "additionalProperties": false,
+        "description": "Immutable batch; node identity is inferred from Bearer authorization. Positive sampling interval no longer than two minutes; end no more than 30 seconds in future. The shared JSON body limit is 64 KiB. Sequence is unique within node/core instance. UTC-normalized typed JSON including item order defines content digest."
+      },
+      "UsageAck": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "batch_id",
+          "digest"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enabled",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionIssued": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Returned once. Server stores only SHA-256 hash."
+          },
+          "urls": {
+            "type": "object",
+            "properties": {
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "base64": {
+                "type": "string",
+                "format": "uri"
+              },
+              "clash": {
+                "type": "string",
+                "format": "uri"
+              },
+              "xray": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "uri",
+              "base64",
+              "clash",
+              "xray"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "token",
+          "urls"
+        ],
+        "additionalProperties": false
+      },
+      "EmptyRequest": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "AccessGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{32}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "node_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{32}$"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "revision",
+          "node_ids"
+        ],
+        "additionalProperties": false
+      },
+      "AccessNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{32}$"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "AccessPlan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "group_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{32}$"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "revision",
+          "group_ids"
+        ],
+        "additionalProperties": false
+      },
+      "AccessOverview": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessGroup"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessNode"
+            }
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessPlan"
+            }
+          }
+        },
+        "required": [
+          "groups",
+          "nodes",
+          "plans"
+        ],
+        "additionalProperties": false
+      },
+      "NodeGroupCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Trimmed name, max100 UTF-8 bytes, no control characters."
+          },
+          "node_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{32}$"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "const": 0,
+            "description": "May be omitted on creation."
+          }
+        },
+        "required": [
+          "name",
+          "node_ids",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "NodeGroupUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Trimmed name, max100 UTF-8 bytes, no control characters."
+          },
+          "node_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{32}$"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "name",
+          "node_ids",
+          "enabled",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "PlanNodeGroupsUpdate": {
+        "type": "object",
+        "properties": {
+          "group_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{32}$"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "Current plans.access_revision from access overview. Stale writes409."
+          }
+        },
+        "required": [
+          "group_ids",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "RevisionOK": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "ok",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "BusinessEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{32}$"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "aggregate_id": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current failed-attempt count, reset by an authorized retry."
+          },
+          "last_error": {
+            "type": "string",
+            "description": "Empty or sanitized failure code, not raw database detail."
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Control-plane delivery completed, not a claim that the Agent/core applied it."
+          },
+          "dead_lettered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "aggregate_id",
+          "attempt_count",
+          "last_error",
+          "available_at",
+          "processed_at",
+          "dead_lettered_at",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "AccountToken": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "AccountEmail": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordReset": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "writeOnly": true
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 72,
+            "writeOnly": true,
+            "description": "Server enforces 12–72 UTF-8 bytes."
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "PasswordChange": {
+        "type": "object",
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 72,
+            "writeOnly": true,
+            "description": "Server enforces 12–72 UTF-8 bytes."
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 72,
+            "writeOnly": true,
+            "description": "Server enforces 12–72 UTF-8 bytes."
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "additionalProperties": false
+      },
+      "RoleChange": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin",
+              "support",
+              "finance",
+              "operator"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "StaffUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin",
+              "support",
+              "finance",
+              "operator"
+            ]
+          },
+          "email_verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "email_verified_at",
+          "created_at"
+        ]
+      },
+      "DevelopmentMail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "Sensitive account action link; development mode and current mailbox only."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "body",
+          "created_at"
+        ]
+      }
+    }
+  },
+  "x-role-permissions": {
+    "user": [],
+    "support": [
+      "orders.read",
+      "users.read"
+    ],
+    "finance": [
+      "overview.read",
+      "orders.read",
+      "plans.write"
+    ],
+    "operator": [
+      "nodes.read",
+      "nodes.write",
+      "access.read",
+      "access.write",
+      "events.read",
+      "events.retry"
+    ],
+    "admin": [
+      "overview.read",
+      "orders.read",
+      "plans.write",
+      "nodes.read",
+      "nodes.write",
+      "access.read",
+      "access.write",
+      "events.read",
+      "events.retry",
+      "entitlements.revoke",
+      "users.read",
+      "users.roles"
+    ]
+  }
+}

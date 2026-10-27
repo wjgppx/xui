@@ -1,0 +1,8 @@
+.env.local
+.local/
+node_modules/
+web/dist/
+bin/
+playwright-report/
+test-results/
+*.log
