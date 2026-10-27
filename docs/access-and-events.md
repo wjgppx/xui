@@ -63,4 +63,4 @@ sequenceDiagram
 
 修复问题后，可重试失败且未完成的事件。重试会清除当前错误、失败计数和死信标记，并立即重新入队；已完成事件及尚未失败的普通待处理事件返回 409。重试请求写入管理员审计。本轮没有逐次失败历史表、外部消息队列或主动推送通道。
 
-已新增共享限流、邮箱验证与找回密码、后台分权和账号邮件投递，详见 [security-and-mail.md](security-and-mail.md)。下一阶段仍需真实支付沙箱和核对、可信代理策略、故障注入、备份恢复及生产规模验证。当前能力和验证结果见 [delivery.md](delivery.md) 与 [verification.md](verification.md)。
+已新增共享限流、邮箱验证与找回密码、后台分权和账号邮件投递，详见 [security-and-mail.md](security-and-mail.md)。支付宝/微信/易支付适配器见 [payments.md](payments.md)。下一阶段仍需各渠道真实商户/沙箱验收和完整账单核对、可信代理策略、故障注入、备份恢复及生产规模验证。当前能力和验证结果见 [delivery.md](delivery.md) 与 [verification.md](verification.md)。

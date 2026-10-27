@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.7.0",
-    "description": "Development platform: accounts with email verification and password recovery, fixed staff roles, PostgreSQL shared rate limits, verified STARTTLS account mail, plans, development settlement, TLS nodes, durable metering, subscriptions, purchase-snapshotted node-group access and transactional business-event delivery. Real payments and production operations acceptance are not implemented."
+    "version": "0.8.0",
+    "description": "Development platform with accounts, staff roles, shared rate limits, verified STARTTLS mail, immutable purchase snapshots, node access, durable metering, subscriptions and transactional events. Opt-in Alipay RSA2 page pay, WeChat Pay API v3 Native and classic Epay MD5 merchant adapters support verified notifications and atomic fulfillment. Real merchant acceptance, refunds and full statement reconciliation remain pending."
   },
   "paths": {
     "/healthz": {
@@ -2190,6 +2190,645 @@
         },
         "x-required-permission": "users.roles"
       }
+    },
+    "/api/v1/payment-methods": {
+      "get": {
+        "summary": "Enabled payment channels",
+        "operationId": "get_api_v1_payment_methods",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentMethod"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Only configured channel IDs and labels. No merchant credentials, key paths or gateway secrets are returned. Empty list by default."
+      }
+    },
+    "/api/v1/orders/{id}/payment": {
+      "post": {
+        "summary": "Create or reuse own fixed-channel checkout",
+        "operationId": "post_api_v1_orders_id_payment",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentIntent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Business order ID owned by the current account."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentCreate"
+              }
+            }
+          }
+        },
+        "description": "Uses the stored integer-CNY purchase snapshot, never browser amounts. Requires a verified email in production. First creation permanently pins one provider and stable merchant payment ID; different-provider retry returns409. Channel disabled404; provider creation failure502; per-peer10/minute and per-user5/minute limits apply independently to creation and sync. A paid callback arriving before the checkout response cannot be downgraded by that response."
+      },
+      "get": {
+        "summary": "Read own payment intent",
+        "operationId": "get_api_v1_orders_id_payment",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentIntent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Business order ID owned by the current account."
+          }
+        ],
+        "description": "Does not contact a provider. Returns404 if no intent exists or the order belongs to another account. Status comes from the server, not the browser return URL."
+      }
+    },
+    "/api/v1/orders/{id}/payment/sync": {
+      "post": {
+        "summary": "Verify own payment with the configured provider",
+        "operationId": "post_api_v1_orders_id_payment_sync",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentIntent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Business order ID owned by the current account."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "description": "For Alipay and WeChat, verifies signed query responses and exact payment ID/amount/currency before atomic fulfillment. Classic Epay api.php has no authenticated response contract; this adapter does not call it or settle from unsigned JSON and returns502 until a valid signed notify is processed. Pending verified results preserve the intent. Verified email required in production; separate shared peer/user sync limit10/5 per minute. Already paid intents return their stored state."
+      }
+    },
+    "/api/v1/payments/notify/{provider}": {
+      "get": {
+        "security": [],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentProvider"
+            }
+          },
+          {
+            "name": "pid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "out_trade_no",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "trade_no",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "money",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "trade_status",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "sign",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          },
+          {
+            "name": "sign_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Part of the classic Epay MD5 notification contract."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider acknowledgement: plain success for Alipay/Epay; SUCCESS JSON for WeChat. Returned only after verified notification processing and, for paid notifications, successful atomic database commit.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "success"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "SUCCESS"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify signed payment provider notification",
+        "operationId": "get_api_v1_payments_notify_provider",
+        "description": "Independent provider authentication; no browser session or Origin required. Body/query maximum64KiB. Valid paid notifications bind provider, merchant payment ID, transaction ID, integer amount and CNY currency before one atomic fulfillment. Replays are idempotent; transaction/order rebinding is rejected. Browser return parameters never settle. Classic Epay GET notification only; other adapters reject GET. Duplicate parameter values are rejected."
+      },
+      "post": {
+        "security": [],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PaymentProvider"
+            }
+          },
+          {
+            "name": "Wechatpay-Timestamp",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for WeChat notifications; not used by Alipay/Epay."
+          },
+          {
+            "name": "Wechatpay-Nonce",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for WeChat notifications; not used by Alipay/Epay."
+          },
+          {
+            "name": "Wechatpay-Serial",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for WeChat notifications; not used by Alipay/Epay."
+          },
+          {
+            "name": "Wechatpay-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required for WeChat notifications; not used by Alipay/Epay."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider acknowledgement: plain success for Alipay/Epay; SUCCESS JSON for WeChat. Returned only after verified notification processing and, for paid notifications, successful atomic database commit.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "success"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "SUCCESS"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Rejected signature/data or transient processing failure. Plain fail or WeChat FAIL JSON. No successful acknowledgement on database failure.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "fail"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "FAIL"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify signed payment provider notification",
+        "operationId": "post_api_v1_payments_notify_provider",
+        "description": "Independent provider authentication; no browser session or Origin required. Body/query maximum64KiB. Valid paid notifications bind provider, merchant payment ID, transaction ID, integer amount and CNY currency before one atomic fulfillment. Replays are idempotent; transaction/order rebinding is rejected. Browser return parameters never settle. Alipay/Epay accept application/x-www-form-urlencoded without query parameters; WeChat accepts its signed/encrypted JSON notification and requires Wechatpay verification headers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Alipay RSA2 or Epay MD5 signed parameters; duplicate keys rejected."
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "event_type": {
+                    "type": "string",
+                    "const": "TRANSACTION.SUCCESS"
+                  },
+                  "resource_type": {
+                    "type": "string",
+                    "const": "encrypt-resource"
+                  },
+                  "resource": {
+                    "type": "object",
+                    "properties": {
+                      "algorithm": {
+                        "const": "AEAD_AES_256_GCM"
+                      },
+                      "ciphertext": {
+                        "type": "string"
+                      },
+                      "associated_data": {
+                        "type": "string"
+                      },
+                      "nonce": {
+                        "type": "string"
+                      },
+                      "original_type": {
+                        "const": "transaction"
+                      }
+                    },
+                    "required": [
+                      "algorithm",
+                      "ciphertext",
+                      "nonce",
+                      "original_type"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "event_type",
+                  "resource_type",
+                  "resource"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3579,6 +4218,108 @@
           "subject",
           "body",
           "created_at"
+        ]
+      },
+      "PaymentProvider": {
+        "type": "string",
+        "enum": [
+          "alipay",
+          "wechat",
+          "epay_alipay",
+          "epay_wechat"
+        ]
+      },
+      "PaymentMethod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PaymentProvider"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "PaymentCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/PaymentProvider"
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "PaymentIntent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "Stable merchant out_trade_no, distinct from the business order ID."
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/PaymentProvider"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "paid"
+            ]
+          },
+          "checkout_kind": {
+            "type": "string",
+            "enum": [
+              "",
+              "redirect",
+              "qr"
+            ]
+          },
+          "checkout_url": {
+            "type": "string",
+            "description": "Empty before checkout creation or after an early paid notification. Sensitive signed payment link; HTTPS redirect or weixin QR content."
+          },
+          "transaction_id": {
+            "type": "string",
+            "description": "Verified provider transaction reference, present after payment."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "provider",
+          "status",
+          "checkout_kind",
+          "checkout_url",
+          "created_at",
+          "updated_at",
+          "paid_at"
         ]
       }
     }

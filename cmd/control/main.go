@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/mailer"
+	"github.com/wjgppx/xui/internal/payments"
 	"github.com/wjgppx/xui/internal/store"
 )
 
@@ -102,6 +103,11 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	registry, err := payments.FromEnvironment()
+	if err != nil {
+		slog.Error("payment configuration invalid", "error", err)
+		os.Exit(1)
+	}
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
@@ -114,7 +120,7 @@ func main() {
 		go func() { defer close(mailDone); mailer.Run(ctx, s, sender) }()
 		defer func() { stop(); <-mailDone }()
 	}
-	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified})
+	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

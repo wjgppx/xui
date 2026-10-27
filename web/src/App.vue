@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NConfigProvider, NInput, NInputNumber, NModal, NTag } from 'naive-ui'
-import { api, type User, type Plan, type Order, type Entitlement, type Overview } from './api'
+import { api, type User, type Plan, type Order, type Entitlement, type Overview, type PaymentMethod } from './api'
 import NodeManager from './NodeManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
 import AccessManager from './AccessManager.vue'
 import AccountSecurity from './AccountSecurity.vue'
 import StaffManager from './StaffManager.vue'
+import PaymentCheckout from './PaymentCheckout.vue'
 
 type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff'
 const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<Plan[]>([]), orders = ref<Order[]>([]), entitlements = ref<Entitlement[]>([])
+const paymentMethods = ref<PaymentMethod[]>([]), paymentMethodsError = ref(''), paymentOrder = ref<Order | null>(null)
 const developmentMail = ref(false), verificationRequired = ref(false)
 const linkAction = ref<'verify' | 'reset' | null>(null), linkToken = ref('')
 const can = (permission: string) => !!user.value && (!verificationRequired.value || !!user.value.email_verified_at) && user.value.permissions?.includes(permission)
@@ -44,11 +46,16 @@ async function load() {
   const [p, c] = await Promise.all([api<Plan[]>('/plans'), api<{ development_payments: boolean; development_mail: boolean; email_verification_required: boolean }>('/config')]); plans.value = p; development.value = c.development_payments; developmentMail.value = c.development_mail; verificationRequired.value = c.email_verification_required
   const r = await fetch('/api/v1/me'); if (r.ok) user.value = await r.json(); else if (r.status !== 401) throw new Error('账号服务暂时不可用')
   await personal()
+  await loadPaymentMethods()
  } catch (e) { error.value = e instanceof Error ? e.message : '加载失败' } finally { loading.value = false }
+}
+async function loadPaymentMethods() {
+ paymentMethodsError.value = ''
+ try { paymentMethods.value = await api<PaymentMethod[]>('/payment-methods') } catch { paymentMethods.value = []; paymentMethodsError.value = '暂时无法读取支付渠道，请刷新后重试。' }
 }
 function openAuth(register = false) { registering.value = register; authOpen.value = true; error.value = '' }
 function authenticate() { return action(async () => { user.value = await api<User>(registering.value ? '/auth/register' : '/auth/login', { email: email.value, password: password.value }); password.value = ''; authOpen.value = false; await personal(); notice.value = '欢迎回来，你的空间已准备就绪。' }) }
-function clearSession() { user.value = null; orders.value = []; entitlements.value = []; overview.value = null; allOrders.value = []; linkAction.value = null; linkToken.value = ''; view.value = 'overview' }
+function clearSession() { paymentOrder.value = null; user.value = null; orders.value = []; entitlements.value = []; overview.value = null; allOrders.value = []; linkAction.value = null; linkToken.value = ''; view.value = 'overview' }
 function logout() { return action(async () => { await api('/auth/logout', {}); clearSession() }) }
 function signedOut() { clearSession(); notice.value = '密码已更新，请重新登录。' }
 async function refreshProfile() { if (!user.value) return; user.value = await api<User>('/me'); await personal() }
@@ -65,6 +72,19 @@ function readAccountFragment() {
 readAccountFragment()
 window.addEventListener('hashchange', readAccountFragment)
 onBeforeUnmount(() => window.removeEventListener('hashchange', readAccountFragment))
+function returnedFromPayment() {
+ const url = new URL(window.location.href)
+ if (!url.searchParams.has('payment_return')) return
+ url.searchParams.delete('payment_return')
+ window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+ view.value = 'orders'; notice.value = '已返回订单页面，请刷新订单查看实际支付结果。'
+}
+returnedFromPayment()
+function openPayment(order: Order) {
+ if (verificationRequired.value && !user.value?.email_verified_at) { view.value = 'security'; notice.value = '请先验证邮箱，再进行支付。'; return }
+ paymentOrder.value = order
+}
+function paymentSettled() { return action(async () => { await personal(); notice.value = '支付已确认，套餐权益已开通。' }) }
 function buy(plan: Plan) {
  if (!user.value) { openAuth(true); return }
  if (verificationRequired.value && !user.value.email_verified_at) { view.value = 'security'; notice.value = '请先验证邮箱，再购买套餐。'; return }
@@ -91,12 +111,12 @@ onMounted(load)
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.7</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.8</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
     <div class="content">
-     <div v-if="development" class="dev-banner"><span>开发体验环境</span> 支付仅用于流程验证，不会产生实际扣款。</div>
+     <div v-if="development" class="dev-banner"><span>开发体验环境</span> 测试支付不会扣款；支付宝、微信等支付渠道以收银台为准。</div>
      <div v-if="error && !authOpen && !planOpen" role="alert" class="alert error">{{ error }} <button @click="load">重新加载</button></div>
      <div v-if="notice" role="status" class="alert success">{{ notice }}</div>
      <div v-if="loading" class="loading">正在准备你的空间…</div>
@@ -118,8 +138,9 @@ onMounted(load)
        <p class="footnote">续费将在现有权益结束后开始。1 GiB = 1024³ 字节。有权使用的已发布节点可在“我的订阅”中获取。</p>
       </template>
       <template v-if="view === 'orders'">
-       <div class="page-heading"><div><p class="eyebrow">YOUR ORDERS</p><h1>每一笔，都有记录。</h1><p>查看订单进度与已开通的套餐。</p></div><NButton @click="view = 'plans'">探索套餐 ↗</NButton></div>
-       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="o.status === 'paid' ? 'success' : 'warning'">{{ o.status === 'paid' ? '已开通' : '待支付' }}</NTag></td><td><NButton v-if="o.status === 'pending' && development" size="small" type="primary" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-else class="muted">{{ o.status === 'paid' ? '已完成' : '支付渠道待接入' }}</span></td></tr></tbody></table></div></section>
+       <div class="page-heading"><div><p class="eyebrow">YOUR ORDERS</p><h1>每一笔，都有记录。</h1><p>查看订单进度与已开通的套餐。</p></div><div class="payment-actions-inline"><NButton v-if="user" :loading="busy" @click="action(async () => { await personal(); await loadPaymentMethods() })">刷新订单</NButton><NButton @click="view = 'plans'">探索套餐 ↗</NButton></div></div>
+       <p v-if="paymentMethodsError" role="alert" class="muted">{{ paymentMethodsError }}</p>
+       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="o.status === 'paid' ? 'success' : 'warning'">{{ o.status === 'paid' ? '已开通' : '待支付' }}</NTag></td><td><div v-if="o.status === 'pending'" class="payment-actions-inline"><NButton v-if="paymentMethods.length" size="small" type="primary" :disabled="busy" @click="openPayment(o)">去支付</NButton><NButton v-if="development" size="small" :type="paymentMethods.length ? 'default' : 'primary'" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-if="!paymentMethods.length && !development" class="muted">{{ paymentMethodsError ? '支付渠道暂不可用' : '支付渠道待配置' }}</span></div><span v-else class="muted">已完成</span></td></tr></tbody></table></div></section>
       </template>
       <template v-if="view === 'admin' && (can('orders.read') || can('overview.read') || can('plans.write'))">
        <div class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>运营工作台</h1><p>查看平台业务记录，管理当前在售套餐。</p></div><NButton v-if="can('plans.write')" type="primary" @click="planOpen = true">＋ 新建套餐</NButton></div>
@@ -131,6 +152,7 @@ onMounted(load)
     </div>
    </main>
   </div>
+  <PaymentCheckout v-if="paymentOrder && user" :key="paymentOrder.id" :order="paymentOrder" :methods="paymentMethods" @close="paymentOrder = null" @settled="paymentSettled" />
   <NModal v-model:show="authOpen" preset="card" :title="registering ? '创建你的账号' : '欢迎回来'" class="auth-modal" style="width: 420px; max-width: calc(100vw - 32px)">
    <form @submit.prevent="authenticate"><p class="muted">{{ registering ? '从这里开启你的连接空间。' : '登录，继续你的连接旅程。' }}</p><div v-if="error" role="alert" class="alert error">{{ error }}</div><label>邮箱<NInput v-model:value="email" type="text" placeholder="you@example.com" :input-props="{ type: 'email', autocomplete: 'email', required: true, 'aria-label': '邮箱' }" /></label><label>密码<NInput v-model:value="password" type="password" show-password-on="click" placeholder="至少 12 位字符" :input-props="{ autocomplete: registering ? 'new-password' : 'current-password', required: true, minlength: 12, 'aria-label': '密码' }" /></label><NButton type="primary" attr-type="submit" block size="large" :loading="busy">{{ registering ? '创建账号' : '登录' }}</NButton><button v-if="!registering" type="button" class="switch-auth" @click="openRecovery">忘记密码？</button><button type="button" class="switch-auth" @click="registering = !registering; error = ''">{{ registering ? '已有账号？前往登录' : '还没有账号？立即创建' }}</button></form>
   </NModal>
@@ -139,6 +161,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.payment-actions-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 @media(min-width:761px){.sidebar.admin-sidebar{overflow-y:auto}}
 @media(min-width:761px) and (max-height:950px){.sidebar.admin-sidebar .sidebar-note{display:none}.sidebar.admin-sidebar .sidebar-footer{margin-top:auto}}
 @media(max-width:760px){nav.admin-navigation{flex-wrap:wrap;margin-left:0;width:100%}nav.admin-navigation button{flex:1 0 auto}}

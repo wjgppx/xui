@@ -34,6 +34,9 @@ var groupSchema string
 //go:embed security.sql
 var securitySchema string
 
+//go:embed payments.sql
+var paymentSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -103,7 +106,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err
@@ -210,6 +213,16 @@ func (s *Store) Settle(ctx context.Context, provider, eventID, orderID, userID s
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = settleTx(ctx, tx, provider, eventID, orderID, userID, amount, currency); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// settleTx preserves one transaction for verified payment intent updates and
+// business fulfillment. User then order locks serialize all renewal paths.
+func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID string, amount int64, currency string) error {
+	var err error
 	var locked string
 	// This lock serializes payments but must remain compatible with the KEY
 	// SHARE locks used by grant foreign keys. A stronger user-row lock can form
@@ -241,7 +254,7 @@ func (s *Store) Settle(ctx context.Context, provider, eventID, orderID, userID s
 		if !match {
 			return ErrPaymentConflict
 		}
-		return tx.Commit(ctx)
+		return nil
 	}
 	if o.Status != "pending" {
 		return ErrPaymentConflict
@@ -264,5 +277,5 @@ func (s *Store) Settle(ctx context.Context, provider, eventID, orderID, userID s
 	if _, err = tx.Exec(ctx, `INSERT INTO outbox_events(id,kind,aggregate_id,payload) VALUES($1,'entitlement.granted',$2,$3)`, ID(), orderID, payload); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }

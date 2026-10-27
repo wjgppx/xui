@@ -46,4 +46,4 @@ bash scripts/test-xray.sh
 
 Mihomo 使用 GitHub 官方 MetaCubeX/mihomo 的 v1.19.15 发行资产 mihomo-linux-amd64-v1-v1.19.15.gz，固定 SHA-256 为 c52a766af250f789fa8e979f8c6a1c279a526bf2c7dd5d6aaedef74db2f8f366。首次从官方 HTTPS 资产取得并固定哈希，安装器复核后使用；这是复现校验值，没有宣称验证了上游签名。二进制位于工作区工具目录，不纳入本仓库源码。
 
-已实现节点组、套餐授权和业务事件投递，手工模式继续兼容；套餐调整与组停用的区别见 [access-and-events.md](access-and-events.md)。账号安全、邮件和 PostgreSQL 共享限流见 [security-and-mail.md](security-and-mail.md)。生产模式排除未验证邮箱的用户，开发模式保留现有测试流程；真实支付仍未接入。
+已实现节点组、套餐授权和业务事件投递，手工模式继续兼容；套餐调整与组停用的区别见 [access-and-events.md](access-and-events.md)。账号安全、邮件和 PostgreSQL 共享限流见 [security-and-mail.md](security-and-mail.md)。生产模式排除未验证邮箱的用户，开发模式保留现有测试流程；支付宝、微信和常见易支付适配器已实现，真实商户验收仍待完成，见 [payments.md](payments.md)。

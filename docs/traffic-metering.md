@@ -41,4 +41,4 @@ Agent 在协调时先尝试提交待发送批次，再读取期望状态。当�
 
 后续需完成持续流量下的重启测量、故障注入、跨节点额度竞争、磁盘恢复和人工核对，再评估无中断更新及更严格的计量策略。已确认批次删除后，旧进程游标与实例元数据目前仍保留；长期节点运行的压缩/保留策略尚待验证。
 
-运行步骤见 [node-agent.md](node-agent.md)，测试结果见 [verification.md](verification.md)。已支持客户端订阅，操作见 subscriptions.md；真实支付仍是后续交付目标。
+运行步骤见 [node-agent.md](node-agent.md)，测试结果见 [verification.md](verification.md)。已支持客户端订阅，操作见 subscriptions.md；支付宝/微信/易支付适配器已增加，真实商户验收、完整对账与退款仍是后续目标，见 [payments.md](payments.md)。

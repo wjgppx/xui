@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/wjgppx/xui/internal/payments"
 	"github.com/wjgppx/xui/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -26,6 +27,7 @@ type Config struct {
 	Development     bool
 	SecureCookies   bool
 	RequireVerified bool
+	Payments        *payments.Registry
 	// PasswordCost defaults to bcrypt.DefaultCost. Tests can use bcrypt.MinCost
 	// to exercise authentication without race-instrumentation CPU amplification.
 	PasswordCost int
@@ -73,6 +75,12 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/me/proxy-credentials/rotate", s.rotateProxyCredentials)
 	m.HandleFunc("GET /api/v1/subscriptions/{token}", s.publicSubscription)
 	m.HandleFunc("GET /api/v1/plans", s.plans)
+	m.HandleFunc("GET /api/v1/payment-methods", s.paymentMethods)
+	m.HandleFunc("POST /api/v1/orders/{id}/payment", s.createPayment)
+	m.HandleFunc("GET /api/v1/orders/{id}/payment", s.orderPayment)
+	m.HandleFunc("POST /api/v1/orders/{id}/payment/sync", s.syncPayment)
+	m.HandleFunc("GET /api/v1/payments/notify/{provider}", s.paymentNotify)
+	m.HandleFunc("POST /api/v1/payments/notify/{provider}", s.paymentNotify)
 	m.HandleFunc("GET /api/v1/orders", s.orders)
 	m.HandleFunc("POST /api/v1/orders", s.createOrder)
 	m.HandleFunc("GET /api/v1/me/entitlements", s.entitlements)
@@ -103,11 +111,12 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
 			machineWrite := r.URL.Path == "/agent/v1/enroll" || r.URL.Path == "/agent/v1/heartbeat" || r.URL.Path == "/agent/v1/applied-state" || r.URL.Path == "/agent/v1/usage-batches"
-			if !machineWrite && r.Header.Get("Origin") != s.Config.Origin {
+			callback := paymentNotificationPath(r.URL.Path)
+			if !machineWrite && !callback && r.Header.Get("Origin") != s.Config.Origin {
 				fail(w, 403, "请求来源不受信任")
 				return
 			}
-			if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			if !callback && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 				fail(w, 415, "请使用 JSON 请求")
 				return
 			}
@@ -117,6 +126,15 @@ func (s *Server) Handler() http.Handler {
 		m.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+func paymentNotificationPath(path string) bool {
+	switch path {
+	case "/api/v1/payments/notify/alipay", "/api/v1/payments/notify/wechat", "/api/v1/payments/notify/epay_alipay", "/api/v1/payments/notify/epay_wechat":
+		return true
+	default:
+		return false
+	}
+}
+
 func reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

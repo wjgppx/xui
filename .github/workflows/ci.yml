@@ -48,7 +48,7 @@ jobs:
           go build -o /tmp/xui-control ./cmd/control
           go build -o bin/xui-agent ./cmd/agent
           /tmp/xui-control > /tmp/xui-api.log 2>&1 &
-          npm --prefix web run dev > /tmp/xui-web.log 2>&1 &
+          npm --prefix web run preview > /tmp/xui-web.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/healthz && curl -fsS http://127.0.0.1:5173/ > /dev/null; then exit 0; fi
             sleep 1

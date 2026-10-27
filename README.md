@@ -1,6 +1,6 @@
 # XUI
 
-独立开发的订阅服务平台。当前增量实现用户门户、运营后台、开发支付到权益，节点 VLESS/Trojan TLS 配置应用、持久化流量入账、节点组/套餐授权、业务事件投递，以及账号安全、后台分权和邮件投递，采用 Go、PostgreSQL、Vue 3、TypeScript 和 Naive UI。
+独立开发的订阅服务平台。当前增量实现用户门户、运营后台、开发支付到权益，节点 VLESS/Trojan TLS 配置应用、持久化流量入账、节点组/套餐授权、业务事件投递，以及账号安全、后台分权、邮件投递和支付宝/微信/易支付适配器，采用 Go、PostgreSQL、Vue 3、TypeScript 和 Naive UI。
 
 完整规划见 [开发方案](docs/development-plan.md)，实际进度见 [交付记录](docs/delivery.md)，交易与周期规则见 [业务规则](docs/business-rules.md)，本轮结果见 [验证记录](docs/verification.md)。
 
@@ -57,7 +57,7 @@ Go 集成测试使用 `TEST_DATABASE_URL`，每次创建独立 schema，结束�
 实际 API 契约见 [api/openapi.json](api/openapi.json)，节点协议见 [agent-contract.md](docs/agent-contract.md)。
 
 - `APP_MODE=development` 才提供测试支付和自己的开发收件箱；`production` 下这些入口返回 404，且要求 HTTPS Origin、Secure Cookie、SMTP 配置和邮箱验证。
-- 测试支付没有连接支付机构沙箱，不产生真实交易。已实现邮箱验证、找回/修改密码、客服/财务/运维/管理员分权及 PostgreSQL 共享限流；真实支付、退款和交易核对尚待实现。
+- 开发测试支付不产生真实交易。已实现支付宝电脑网站支付 RSA2、微信 Native API v3 和常见易支付 MD5 接口，可按商户配置显式启用。真实商户/官方沙箱投递验收、退款和完整账单对账仍待完成，配置见 [支付接入](docs/payments.md)。
 - 已支持权益过滤与 VLESS/Trojan TCP + TLS 配置应用。整份配置重启会中断连接，失联在最长 60 秒授权租约到期后停机。已接入 SQLite 流量待发送批次、服务端去重与额度入账。采样/上报有延迟，最终采样到停止或崩溃仍可能丢失尚未采集的字节；已支持订阅导出与业务事件 outbox 消费；事件投递完成和内核应用状态分别展示。
 - 订单与管理员列表当前展示最近 100 条；分页、订单关闭、更多运营操作后续实现。
 - 当前只能作为开发版本使用，生产上线须完成交付记录中的节点能力、交易核对、权限和运维验收。
@@ -76,3 +76,9 @@ Go 集成测试使用 `TEST_DATABASE_URL`，每次创建独立 schema，结束�
 ## 套餐与节点组
 
 “权限管理”可维护节点组、配置新订单的套餐授权并查看/重试失败业务事件。套餐组在下单时形成快照；组成员与启用状态影响既有权益的运行时可用节点。入站可选择手工兼容模式或套餐节点组模式。控制端正常启动自动运行事件消费者；详情见 [授权和事件](docs/access-and-events.md)。
+
+## 支付渠道
+
+使用 `PAYMENT_METHODS` 显式启用 `alipay`、`wechat`、`epay_alipay` 或 `epay_wechat`。默认不启用真实渠道，也不生成商户凭据。前端根据已启用渠道显示支付方式，服务端验签并核对订单快照后才开通权益。易支付以签名通知为准，不用无签名的旧查询接口认定付款成功。密钥、回调、产品范围和验收边界见 [支付接入](docs/payments.md)。
+
+浏览器验收建议先执行 `npm --prefix web run build`，再在单独终端执行 `npm --prefix web run preview`，以构建产物监听测试端口5173；同时保持API运行，然后在web目录执行 `npm run test:e2e`。日常开发仍使用 `npm --prefix web run dev`。CI采用构建产物运行浏览器回归，避免开发模块冷加载和热更新影响验收。
