@@ -224,6 +224,9 @@ func (a *alipayProvider) Verify(r *http.Request) (Notification, error) {
 // Read the envelope without duplicate keys and preserve the exact signed JSON
 // bytes; re-marshalling the response before verification would change its proof.
 func alipayEnvelope(data []byte) (json.RawMessage, string, error) {
+	return alipayNamedEnvelope(data, "alipay_trade_query_response")
+}
+func alipayNamedEnvelope(data []byte, responseName string) (json.RawMessage, string, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
@@ -242,7 +245,7 @@ func alipayEnvelope(data []byte) (json.RawMessage, string, error) {
 			return nil, "", ErrGateway
 		}
 		seen[key] = true
-		if key == "alipay_trade_query_response" {
+		if key == responseName {
 			if e = decoder.Decode(&payload); e != nil {
 				return nil, "", ErrGateway
 			}
@@ -300,6 +303,7 @@ func (a *alipayProvider) Query(ctx context.Context, r Request) (Notification, er
 	}
 	var body struct {
 		Code          string `json:"code"`
+		SubCode       string `json:"sub_code"`
 		OutTradeNo    string `json:"out_trade_no"`
 		TradeNo       string `json:"trade_no"`
 		TradeStatus   string `json:"trade_status"`
@@ -312,7 +316,10 @@ func (a *alipayProvider) Query(ctx context.Context, r Request) (Notification, er
 		return Notification{}, ErrGateway
 	}
 	if body.Code != "10000" {
-		return Notification{}, ErrNotPaid
+		if body.SubCode == "ACQ.TRADE_NOT_EXIST" {
+			return Notification{}, ErrNotPaid
+		}
+		return Notification{}, ErrGateway
 	}
 	if body.OutTradeNo != r.PaymentID || (body.AppID != "" && body.AppID != a.config.AppID) || (body.SellerID != "" && body.SellerID != a.config.SellerID) || (body.TransCurrency != "" && body.TransCurrency != "CNY") {
 		return Notification{}, ErrVerification
@@ -327,5 +334,5 @@ func (a *alipayProvider) Query(ctx context.Context, r Request) (Notification, er
 	if body.TradeStatus != "TRADE_SUCCESS" && body.TradeStatus != "TRADE_FINISHED" && body.TradeStatus != "WAIT_BUYER_PAY" && body.TradeStatus != "TRADE_CLOSED" {
 		return Notification{}, ErrVerification
 	}
-	return Notification{PaymentID: r.PaymentID, TransactionID: body.TradeNo, Amount: amount, Currency: "CNY", Paid: body.TradeStatus == "TRADE_SUCCESS" || body.TradeStatus == "TRADE_FINISHED"}, nil
+	return Notification{PaymentID: r.PaymentID, TransactionID: body.TradeNo, Amount: amount, Currency: "CNY", Paid: body.TradeStatus == "TRADE_SUCCESS" || body.TradeStatus == "TRADE_FINISHED", Closed: body.TradeStatus == "TRADE_CLOSED"}, nil
 }

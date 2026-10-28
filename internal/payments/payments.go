@@ -26,6 +26,9 @@ type Notification struct {
 	Amount                   int64
 	Currency                 string
 	Paid                     bool
+	// Closed is positive authenticated transaction-state evidence, distinct
+	// from an unpaid or absent transaction. Used to recover a lost close reply.
+	Closed bool
 }
 type Provider interface {
 	ID() string

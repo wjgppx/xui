@@ -13,6 +13,19 @@ import (
 // Payment channels are opt-in. Configuration errors name the channel only;
 // merchant secrets and filesystem contents never appear in errors.
 func FromEnvironment() (*Registry, error) { return loadEnvironment(os.Getenv) }
+func ActionsEnabledFromEnvironment() (bool, error) {
+	return actionsEnabled(os.Getenv("PAYMENT_ACTIONS_ENABLED"))
+}
+func actionsEnabled(value string) (bool, error) {
+	switch strings.TrimSpace(value) {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, errors.New("PAYMENT_ACTIONS_ENABLED must be true or false")
+	}
+}
 func loadEnvironment(get func(string) string) (*Registry, error) {
 	var providers []Provider
 	seen := map[string]bool{}

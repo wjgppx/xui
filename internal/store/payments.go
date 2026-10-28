@@ -106,8 +106,9 @@ func (s *Store) CreatePayment(ctx context.Context, userID, orderID, provider str
 }
 
 func (s *Store) Payment(ctx context.Context, userID, orderID string) (Payment, error) {
-	// SELECT a single table's columns to avoid accidental owner metadata exposure.
-	return scanPayment(s.DB.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE order_id=$1 AND EXISTS(SELECT 1 FROM orders WHERE id=$1 AND user_id=$2)`, orderID, userID))
+	// Return only payment fields, with an explicit owner predicate and a checkout
+	// fence for orders that are closing, closed or refunded.
+	return scanPayment(s.DB.QueryRow(ctx, `SELECT p.id,p.order_id,p.provider,p.status,CASE WHEN o.status IN ('closing','closed','refunded') THEN '' ELSE p.checkout_kind END,CASE WHEN o.status IN ('closing','closed','refunded') THEN '' ELSE p.checkout_url END,p.transaction_id,p.created_at,p.updated_at,p.paid_at FROM payment_intents p JOIN orders o ON o.id=p.order_id WHERE p.order_id=$1 AND o.user_id=$2`, orderID, userID))
 }
 
 // SavePaymentCheckout stores only the first checkout. A callback may win this
@@ -122,9 +123,23 @@ func (s *Store) SavePaymentCheckout(ctx context.Context, id, kind, link string) 
 		return Payment{}, err
 	}
 	defer tx.Rollback(ctx)
+	var orderID, orderStatus string
+	if err = tx.QueryRow(ctx, `SELECT order_id FROM payment_intents WHERE id=$1`, id).Scan(&orderID); errors.Is(err, pgx.ErrNoRows) {
+		return Payment{}, ErrNotFound
+	} else if err != nil {
+		return Payment{}, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1 FOR NO KEY UPDATE`, orderID).Scan(&orderStatus); err != nil {
+		return Payment{}, err
+	}
 	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR NO KEY UPDATE`, id))
 	if err != nil {
 		return Payment{}, err
+	}
+	if orderStatus == "closing" || orderStatus == "closed" || orderStatus == "refunded" {
+		p.CheckoutURL = ""
+		p.CheckoutKind = ""
+		return p, tx.Commit(ctx)
 	}
 	if p.Status != "paid" && p.CheckoutURL == "" {
 		p, err = scanPayment(tx.QueryRow(ctx, `UPDATE payment_intents SET status='ready',checkout_kind=$2,checkout_url=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING `+paymentColumns, id, kind, link))
@@ -158,7 +173,7 @@ func (s *Store) SettlePayment(ctx context.Context, paymentID, provider, transact
 	}
 	// The helper holds user/order locks until this transaction commits. Its event
 	// uniqueness also rejects a transaction replayed against a different order.
-	if err = settleTx(ctx, tx, provider, transactionID, orderID, userID, amount, currency); err != nil {
+	if err = settleTx(ctx, tx, provider, transactionID, orderID, userID, amount, currency, true); err != nil {
 		return err
 	}
 	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR NO KEY UPDATE`, paymentID))

@@ -200,6 +200,12 @@ func TestAlipayQueryAuthenticatesRawResponseAndRequest(t *testing.T) {
 		}
 		payload := `{ "code" : "10000", "out_trade_no":"` + strings.Repeat("a", 32) + `", "trade_no":"202610272200000001", "trade_status":"TRADE_SUCCESS", "total_amount":"19.01" }`
 		switch mode {
+		case "closed":
+			payload = strings.Replace(payload, "TRADE_SUCCESS", "TRADE_CLOSED", 1)
+		case "business_error":
+			payload = `{"code":"40004","sub_code":"ACQ.INVALID_PARAMETER"}`
+		case "not_found":
+			payload = `{"code":"40004","sub_code":"ACQ.TRADE_NOT_EXIST"}`
 		case "pending":
 			payload = strings.Replace(payload, "TRADE_SUCCESS", "WAIT_BUYER_PAY", 1)
 		case "wrong_order":
@@ -246,7 +252,16 @@ func TestAlipayQueryAuthenticatesRawResponseAndRequest(t *testing.T) {
 	if err != nil || n.Paid {
 		t.Fatal("pending trade settled", err)
 	}
-	for _, m := range []string{"wrong_order", "wrong_amount", "wrong_merchant", "wrong_signature", "tampered_after_signing", "duplicate_envelope", "redirect", "oversized"} {
+	mode = "closed"
+	n, err = p.Query(context.Background(), alipayTestRequest())
+	if err != nil || n.Paid || !n.Closed {
+		t.Fatal("signed closed state lost", n, err)
+	}
+	mode = "not_found"
+	if _, err = p.Query(context.Background(), alipayTestRequest()); !errors.Is(err, ErrNotPaid) {
+		t.Fatal(err)
+	}
+	for _, m := range []string{"business_error", "wrong_order", "wrong_amount", "wrong_merchant", "wrong_signature", "tampered_after_signing", "duplicate_envelope", "redirect", "oversized"} {
 		t.Run(m, func(t *testing.T) {
 			mode = m
 			if _, e := p.Query(context.Background(), alipayTestRequest()); e == nil {

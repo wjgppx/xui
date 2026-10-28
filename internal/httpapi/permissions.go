@@ -6,9 +6,9 @@ import (
 )
 
 var rolePermissions = map[string][]string{
-	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry"},
+	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve"},
 	"support":  {"orders.read", "users.read"},
-	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry"},
+	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request"},
 	"operator": {"nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry"},
 	"user":     {},
 }
@@ -25,6 +25,14 @@ func permitted(role, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/admin/refunds":
+		return "refunds.read"
+	case strings.HasPrefix(p, "/api/v1/admin/refunds/") && strings.HasSuffix(p, "/approve"):
+		return "refunds.approve"
+	case strings.HasPrefix(p, "/api/v1/admin/payments/") && strings.HasSuffix(p, "/refund"):
+		return "refunds.request"
+	case strings.HasPrefix(p, "/api/v1/admin/payments/") && strings.HasSuffix(p, "/close"):
+		return "payments.close"
 	case p == "/api/v1/admin/payments" || p == "/api/v1/admin/payment-activity":
 		return "payments.read"
 	case strings.HasPrefix(p, "/api/v1/admin/payments/"):

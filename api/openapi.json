@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.9.0",
-    "description": "Development subscription platform with immutable purchase snapshots, node access, durable metering and verified merchant adapters. Payment operations add expiring orders, safe pre-intent local closure, leased durable Alipay/WeChat queries, bounded retries, staff payment summaries and append-only sanitized activity. Local expiry is not remote payment closure. Real merchant acceptance, provider close/refunds and full statement reconciliation remain pending."
+    "version": "0.10.0",
+    "description": "Independent subscription platform. Adds opt-in, durable signed Alipay/WeChat gateway closure and original-payment full refunds with approval, fresh password authentication, stable request identity, bounded recovery and atomic entitlement revocation. Real merchant acceptance and full statement reconciliation remain pending."
   },
   "paths": {
     "/healthz": {
@@ -3082,7 +3082,7 @@
             }
           }
         },
-        "description": "Admin/finance only. Schedules Alipay/WeChat query and records audit atomically; never directly marks paid or grants rights. Resets counters and begins a new7-day observation horizon. Existing active lease, already-paid/closed payment or classic Epay409; missing payment404. Per-peer10/minute. Verified email required in production.",
+        "description": "Admin/finance only. Schedules Alipay/WeChat query and records audit atomically; never directly marks paid or grants rights. Resets counters and begins a new7-day observation horizon. Existing active lease, already-paid/closed payment or classic Epay409; missing payment404. Per-peer10/minute. Verified email required in production. Closing and refunded orders also reject payment-query requeue; use the close/refund action recovery instead.",
         "parameters": [
           {
             "name": "id",
@@ -3114,6 +3114,233 @@
           }
         },
         "x-required-permission": "payments.retry"
+      }
+    },
+    "/api/v1/admin/payments/{id}/refund": {
+      "post": {
+        "summary": "Staff: request original-payment full refund draft",
+        "operationId": "post_api_v1_admin_payments_id_refund",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "refunds.request",
+        "description": "Admin/finance. Only paid Alipay/WeChat orders. Idempotently returns the existing immutable refund. Does not submit a gateway request or revoke access; works with actions disabled. Verified email required in production. Admin/finance requests are rate limited to5 per peer and5 per user per purpose per minute. Amount/provider/transaction IDs cannot be overridden.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRefund"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input;401 authentication/password;403 role/security change;404 absent;409 state/channel conflict;429 rate limit;503 disabled/unavailable. Errors contain no merchant secrets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentActionReason"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/refunds": {
+      "get": {
+        "summary": "Staff: latest100 refund summaries",
+        "operationId": "get_api_v1_admin_refunds",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "refunds.read",
+        "description": "Admin/finance. Unknown query parameters rejected. Excludes raw gateway payloads and secrets.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRefundList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input;401 authentication/password;403 role/security change;404 absent;409 state/channel conflict;429 rate limit;503 disabled/unavailable. Errors contain no merchant secrets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/refunds/{id}/approve": {
+      "post": {
+        "summary": "Admin: approve or resume full refund recovery",
+        "operationId": "post_api_v1_admin_refunds_id_approve",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "refunds.approve",
+        "description": "Admin only, fresh current password and unchanged security generation. PAYMENT_ACTIONS_ENABLED must be true. Queues requested or manual_required refund with the same refund ID; queued/processing/succeeded repeats are idempotent. Signed specific refund absence permits submission; uncertainty is queried again. Success atomically revokes original rights and emits entitlement.revoked. Verified email required in production. Admin/finance requests are rate limited to5 per peer and5 per user per purpose per minute. Amount/provider/transaction IDs cannot be overridden.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input;401 authentication/password;403 role/security change;404 absent;409 state/channel conflict;429 rate limit;503 disabled/unavailable. Errors contain no merchant secrets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentActionApproval"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/payments/{id}/close": {
+      "post": {
+        "summary": "Staff: request signed gateway close",
+        "operationId": "post_api_v1_admin_payments_id_close",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "payments.close",
+        "description": "Admin/finance with fresh password and explicit action gate. Pending/expired direct-channel payment becomes closing, checkout is fenced. A durable60-second lease worker queries payment first; paid wins. Only signed positive closure marks closed. Not-found never proves closure. Repeating an active request is idempotent; a manual_required job resumes using the same ID. Verified email required in production. Admin/finance requests are rate limited to5 per peer and5 per user per purpose per minute. Amount/provider/transaction IDs cannot be overridden. A signed exact transaction query that positively reports closed also recovers a lost gateway-close reply.",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input;401 authentication/password;403 role/security change;404 absent;409 state/channel conflict;429 rate limit;503 disabled/unavailable. Errors contain no merchant secrets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentCloseRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal PUBLIC_ORIGIN."
+          }
+        ]
       }
     }
   },
@@ -3330,8 +3557,10 @@
             "enum": [
               "pending",
               "expired",
+              "closing",
               "closed",
-              "paid"
+              "paid",
+              "refunded"
             ]
           },
           "created_at": {
@@ -3356,7 +3585,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set only when a no-intent order is safely closed locally; this does not represent a payment-gateway close operation."
+            "description": "Local no-intent close or positively verified gateway close. A later verified payment clears this timestamp and fulfills the order."
           }
         },
         "required": [
@@ -3471,12 +3700,17 @@
           },
           "email_verification_required": {
             "type": "boolean"
+          },
+          "payment_actions_enabled": {
+            "type": "boolean",
+            "description": "Explicit PAYMENT_ACTIONS_ENABLED=true; otherwise approval and gateway close return503 and action worker is stopped. Refund drafts remain available."
           }
         },
         "required": [
           "development_payments",
           "development_mail",
-          "email_verification_required"
+          "email_verification_required",
+          "payment_actions_enabled"
         ]
       },
       "Health": {
@@ -4591,7 +4825,7 @@
           },
           "checkout_url": {
             "type": "string",
-            "description": "Empty before checkout creation or after an early paid notification. Sensitive signed payment link; HTTPS redirect or weixin QR content."
+            "description": "Empty before checkout creation or after an early paid notification. Sensitive signed payment link; HTTPS redirect or weixin QR content. Empty for closing, closed and refunded orders. Payment status stays paid after a refund to preserve original evidence."
           },
           "transaction_id": {
             "type": "string",
@@ -4681,8 +4915,10 @@
             "enum": [
               "pending",
               "expired",
+              "closing",
               "closed",
-              "paid"
+              "paid",
+              "refunded"
             ]
           },
           "expires_at": {
@@ -4697,7 +4933,8 @@
               "waiting",
               "paid",
               "manual_required",
-              "waiting_callback"
+              "waiting_callback",
+              "closed"
             ]
           },
           "reconcile_attempts": {
@@ -4720,7 +4957,14 @@
               "provider_unavailable",
               "closed",
               "retry_scheduled",
-              "manual_required"
+              "manual_required",
+              "requested",
+              "approved",
+              "submitted",
+              "succeeded",
+              "failed",
+              "not_found",
+              "unsupported"
             ]
           },
           "next_check_at": {
@@ -4749,7 +4993,7 @@
           "last_outcome",
           "next_check_at"
         ],
-        "description": "Sanitized staff summary; no checkout URL, provider signature, raw notification or merchant key is returned. Paid payment status wins over a stale reconciliation job status."
+        "description": "Sanitized staff summary; no checkout URL, provider signature, raw notification or merchant key is returned. Paid payment status wins over a stale reconciliation job status. For closing orders, status, attempts, outcome and next check describe the gateway-close job; closed orders have no next check."
       },
       "PaymentOverviewList": {
         "type": "object",
@@ -4782,7 +5026,9 @@
               "query",
               "auto_query",
               "close",
-              "retry"
+              "retry",
+              "refund",
+              "gateway_close"
             ]
           },
           "outcome": {
@@ -4800,7 +5046,14 @@
               "provider_unavailable",
               "closed",
               "retry_scheduled",
-              "manual_required"
+              "manual_required",
+              "requested",
+              "approved",
+              "submitted",
+              "succeeded",
+              "failed",
+              "not_found",
+              "unsupported"
             ]
           },
           "created_at": {
@@ -4857,7 +5110,9 @@
               "query",
               "auto_query",
               "close",
-              "retry"
+              "retry",
+              "refund",
+              "gateway_close"
             ]
           },
           "outcome": {
@@ -4875,7 +5130,14 @@
               "provider_unavailable",
               "closed",
               "retry_scheduled",
-              "manual_required"
+              "manual_required",
+              "requested",
+              "approved",
+              "submitted",
+              "succeeded",
+              "failed",
+              "not_found",
+              "unsupported"
             ]
           },
           "created_at": {
@@ -4915,6 +5177,264 @@
           "provider"
         ],
         "description": "Same sanitized activity shape as per-payment activity; untrusted notification identity stays null."
+      },
+      "PaymentActionReason": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Trimmed, valid UTF-8, 1–256 bytes; control characters rejected. Immutable once the request is created."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "PaymentActionApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Fresh password check and transactionally locked security_version are required."
+          }
+        },
+        "required": [
+          "current_password"
+        ]
+      },
+      "PaymentCloseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Trimmed, valid UTF-8, 1–256 bytes; control characters rejected. Immutable once the request is created."
+          },
+          "current_password": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Fresh password check and transactionally locked security_version are required."
+          }
+        },
+        "required": [
+          "reason",
+          "current_password"
+        ]
+      },
+      "PaymentRefund": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "queued",
+              "processing",
+              "succeeded",
+              "failed",
+              "manual_required"
+            ]
+          },
+          "approved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_refund_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "payment_id",
+          "order_id",
+          "transaction_id",
+          "currency",
+          "reason",
+          "requested_by",
+          "provider",
+          "amount_minor",
+          "status",
+          "approved_by",
+          "provider_refund_id",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "description": "One immutable full-amount CNY refund per original payment. Draft and approval retain access; only signed exact success revokes the original entitlement. Original payment evidence and future renewal periods are preserved."
+      },
+      "PaymentRefundOverview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "queued",
+              "processing",
+              "succeeded",
+              "failed",
+              "manual_required"
+            ]
+          },
+          "approved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_refund_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "user_email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "payment_id",
+          "order_id",
+          "transaction_id",
+          "currency",
+          "reason",
+          "requested_by",
+          "provider",
+          "amount_minor",
+          "status",
+          "approved_by",
+          "provider_refund_id",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "user_email"
+        ]
+      },
+      "PaymentRefundList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentRefundOverview"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
       }
     }
   },

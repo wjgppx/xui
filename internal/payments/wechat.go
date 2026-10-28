@@ -125,6 +125,9 @@ func (w *wechatProvider) verifyHeaders(header http.Header, body []byte) error {
 }
 
 func (w *wechatProvider) call(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return w.callStatus(ctx, method, path, body, http.StatusOK)
+}
+func (w *wechatProvider) callStatus(ctx context.Context, method, path string, body []byte, successStatus int) ([]byte, error) {
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return nil, ErrGateway
@@ -161,11 +164,11 @@ func (w *wechatProvider) call(ctx context.Context, method, path string, body []b
 		var failure struct {
 			Code string `json:"code"`
 		}
-		if json.Unmarshal(data, &failure) == nil && failure.Code == "ORDER_NOT_EXIST" {
+		if json.Unmarshal(data, &failure) == nil && ((!strings.HasPrefix(path, "/v3/refund/domestic/refunds/") && failure.Code == "ORDER_NOT_EXIST") || (method == http.MethodGet && strings.HasPrefix(path, "/v3/refund/domestic/refunds/") && failure.Code == "RESOURCE_NOT_EXISTS")) {
 			return nil, ErrNotPaid
 		}
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != successStatus {
 		return nil, ErrGateway
 	}
 	return data, nil
@@ -234,7 +237,7 @@ func (w *wechatProvider) transaction(data []byte) (Notification, error) {
 	default:
 		return Notification{}, ErrVerification
 	}
-	return Notification{PaymentID: t.PaymentID, TransactionID: t.TransactionID, Amount: t.Amount.Total, Currency: t.Amount.Currency, Paid: paid}, nil
+	return Notification{PaymentID: t.PaymentID, TransactionID: t.TransactionID, Amount: t.Amount.Total, Currency: t.Amount.Currency, Paid: paid, Closed: t.State == "CLOSED"}, nil
 }
 func (w *wechatProvider) Verify(r *http.Request) (Notification, error) {
 	if r.Method != http.MethodPost || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {

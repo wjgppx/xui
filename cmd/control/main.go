@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/mailer"
+	"github.com/wjgppx/xui/internal/paymentactions"
 	"github.com/wjgppx/xui/internal/payments"
 	"github.com/wjgppx/xui/internal/reconcile"
 	"github.com/wjgppx/xui/internal/store"
@@ -109,6 +110,11 @@ func main() {
 		slog.Error("payment configuration invalid", "error", err)
 		os.Exit(1)
 	}
+	actionsEnabled, err := payments.ActionsEnabledFromEnvironment()
+	if err != nil {
+		slog.Error("payment action configuration invalid")
+		os.Exit(1)
+	}
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
@@ -124,7 +130,12 @@ func main() {
 	reconcileDone := make(chan struct{})
 	go func() { defer close(reconcileDone); reconcile.Run(ctx, s, registry, origin) }()
 	defer func() { stop(); <-reconcileDone }()
-	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry})
+	if actionsEnabled {
+		actionDone := make(chan struct{})
+		go func() { defer close(actionDone); paymentactions.Run(ctx, s, registry, origin) }()
+		defer func() { stop(); <-actionDone }()
+	}
+	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

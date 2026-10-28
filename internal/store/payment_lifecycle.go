@@ -179,14 +179,14 @@ func (s *Store) FinishPaymentReconciliation(ctx context.Context, paymentID, clai
 
 func paymentActivitySource(source string) bool {
 	switch source {
-	case "create", "notify", "query", "auto_query", "close", "retry":
+	case "create", "notify", "query", "auto_query", "close", "retry", "refund", "gateway_close":
 		return true
 	}
 	return false
 }
 func paymentActivityOutcome(outcome string) bool {
 	switch outcome {
-	case "created", "ready", "paid", "pending", "not_paid", "gateway_error", "verification_error", "storage_error", "conflict", "provider_unavailable", "closed", "retry_scheduled", "manual_required":
+	case "created", "ready", "paid", "pending", "not_paid", "gateway_error", "verification_error", "storage_error", "conflict", "provider_unavailable", "closed", "retry_scheduled", "manual_required", "requested", "approved", "submitted", "succeeded", "failed", "not_found", "unsupported":
 		return true
 	}
 	return false
@@ -295,10 +295,10 @@ func (s *Store) ListPayments(ctx context.Context, status, provider, orderID stri
 	}
 	rows, err := s.DB.Query(ctx, `SELECT p.id,p.order_id,u.email,p.provider,p.status,o.price_minor,o.currency,p.transaction_id,p.created_at,p.paid_at,
  CASE WHEN o.status='pending' AND o.expires_at<=clock_timestamp() THEN 'expired' ELSE o.status END,o.expires_at,
- CASE WHEN p.status='paid' THEN 'paid' ELSE COALESCE(j.status,CASE WHEN p.provider IN ('epay_alipay','epay_wechat') THEN 'waiting_callback' ELSE 'queued' END) END,
- COALESCE(j.attempts,0),COALESCE(j.last_outcome,''),CASE WHEN j.status IN ('queued','waiting') AND p.status<>'paid' THEN j.next_attempt_at ELSE NULL END
- FROM payment_intents p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id LEFT JOIN payment_reconciliation j ON j.payment_id=p.id
- WHERE ($1='' OR p.status=$1 OR ($1='manual_required' AND j.status='manual_required' AND p.status<>'paid')) AND ($2='' OR p.provider=$2) AND ($3='' OR p.order_id=$3)
+ CASE WHEN p.status='paid' THEN 'paid' WHEN o.status='closed' THEN 'closed' WHEN o.status='closing' THEN COALESCE(c.status,'queued') ELSE COALESCE(j.status,CASE WHEN p.provider IN ('epay_alipay','epay_wechat') THEN 'waiting_callback' ELSE 'queued' END) END,
+ CASE WHEN o.status='closing' THEN COALESCE(c.attempts,0) ELSE COALESCE(j.attempts,0) END,CASE WHEN o.status='closing' THEN COALESCE(c.last_outcome,'') ELSE COALESCE(j.last_outcome,'') END,CASE WHEN p.status='paid' OR o.status='closed' THEN NULL WHEN o.status='closing' AND c.status IN ('queued','waiting') THEN c.next_attempt_at WHEN o.status IN ('pending','expired') AND j.status IN ('queued','waiting') THEN j.next_attempt_at ELSE NULL END
+ FROM payment_intents p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id LEFT JOIN payment_reconciliation j ON j.payment_id=p.id LEFT JOIN payment_action_jobs c ON c.payment_id=p.id AND c.kind='close'
+ WHERE ($1='' OR p.status=$1 OR ($1='manual_required' AND p.status<>'paid' AND ((o.status='closing' AND c.status='manual_required') OR (o.status IN ('pending','expired') AND j.status='manual_required')))) AND ($2='' OR p.provider=$2) AND ($3='' OR p.order_id=$3)
  ORDER BY p.created_at DESC,p.id DESC LIMIT 100`, status, provider, orderID)
 	if err != nil {
 		return nil, err
@@ -370,7 +370,7 @@ func (s *Store) RetryPaymentReconciliation(ctx context.Context, actorID, payment
 	if err != nil {
 		return err
 	}
-	if (provider != "alipay" && provider != "wechat") || status == "paid" || orderStatus == "closed" {
+	if (provider != "alipay" && provider != "wechat") || status == "paid" || (orderStatus != "pending" && orderStatus != "expired") {
 		return ErrPaymentConflict
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO payment_reconciliation(payment_id,horizon_at) VALUES($1,clock_timestamp()+interval '7 days') ON CONFLICT DO NOTHING`, paymentID)

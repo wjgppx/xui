@@ -40,6 +40,9 @@ var paymentSchema string
 //go:embed payment_lifecycle.sql
 var paymentLifecycleSchema string
 
+//go:embed payment_actions.sql
+var paymentActionsSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -111,7 +114,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err
@@ -218,7 +221,7 @@ func (s *Store) Settle(ctx context.Context, provider, eventID, orderID, userID s
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = settleTx(ctx, tx, provider, eventID, orderID, userID, amount, currency); err != nil {
+	if err = settleTx(ctx, tx, provider, eventID, orderID, userID, amount, currency, false); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -226,7 +229,7 @@ func (s *Store) Settle(ctx context.Context, provider, eventID, orderID, userID s
 
 // settleTx preserves one transaction for verified payment intent updates and
 // business fulfillment. User then order locks serialize all renewal paths.
-func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID string, amount int64, currency string) error {
+func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID string, amount int64, currency string, allowRemoteClosed bool) error {
 	var err error
 	var locked string
 	// This lock serializes payments but must remain compatible with the KEY
@@ -261,7 +264,7 @@ func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID
 		}
 		return nil
 	}
-	if o.Status != "pending" && o.Status != "expired" {
+	if o.Status != "pending" && o.Status != "expired" && !(allowRemoteClosed && (o.Status == "closing" || o.Status == "closed")) {
 		return ErrPaymentConflict
 	}
 	var start time.Time
@@ -275,7 +278,7 @@ func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID
 	if _, err = tx.Exec(ctx, `INSERT INTO entitlement_node_groups(entitlement_period_id,group_id) SELECT $1,group_id FROM order_node_groups WHERE order_id=$2`, entitlementID, orderID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE orders SET status='paid',paid_at=now() WHERE id=$1`, orderID); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE orders SET status='paid',paid_at=now(),closed_at=NULL WHERE id=$1`, orderID); err != nil {
 		return err
 	}
 	payload, _ := json.Marshal(map[string]string{"user_id": userID, "entitlement_id": entitlementID})

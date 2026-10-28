@@ -11,7 +11,7 @@ let mounted = true, announcedPaid = false
 const providerName = computed(() => props.methods.find(m => m.id === payment.value?.provider)?.name || payment.value?.provider || '')
 const now = ref(Date.now())
 const clock = window.setInterval(() => { now.value = Date.now() }, 1000)
-const cannotPay = computed(() => props.order.status === 'expired' || props.order.status === 'closed' || (!!props.order.expires_at && new Date(props.order.expires_at).getTime() <= now.value))
+const cannotPay = computed(() => props.order.status === 'expired' || props.order.status === 'closed' || props.order.status === 'closing' || props.order.status === 'refunded' || (!!props.order.expires_at && new Date(props.order.expires_at).getTime() <= now.value))
 const canCheck = computed(() => payment.value?.provider === 'alipay' || payment.value?.provider === 'wechat')
 const checkoutURL = computed(() => {
  try {
@@ -76,12 +76,15 @@ onBeforeUnmount(() => { mounted = false; window.clearInterval(clock) })
   <div v-if="error" role="alert" class="alert error">{{ error }}</div>
   <div v-if="notice" role="status" class="alert success">{{ notice }}</div>
   <p v-if="loading" class="muted">正在读取支付状态…</p>
+  <template v-else-if="order.status === 'refunded'">
+   <NTag round>订单已退款</NTag><p class="muted">退款已确认，原订单对应的套餐权益已撤销。</p>
+  </template>
   <template v-else-if="payment?.status === 'paid'">
    <NTag type="success" round>支付已确认</NTag>
    <p>套餐权益已开通，可以关闭窗口查看订单和权益。</p>
   </template>
   <template v-else-if="cannotPay">
-   <NTag round>{{ order.status === 'closed' ? '订单已关闭' : '订单已超时' }}</NTag>
+   <NTag round>{{ order.status === 'closed' ? '订单已关闭' : order.status === 'closing' ? '渠道关单中' : '订单已超时' }}</NTag>
    <p class="muted">此订单已停止发起付款。若你已完成付款，可以刷新或核对结果，系统仍会核实有效的付款通知。</p>
   </template>
   <template v-else>

@@ -9,11 +9,12 @@ import AccountSecurity from './AccountSecurity.vue'
 import StaffManager from './StaffManager.vue'
 import PaymentCheckout from './PaymentCheckout.vue'
 const PaymentOperations = defineAsyncComponent(() => import('./PaymentOperations.vue'))
+const RefundOperations = defineAsyncComponent(() => import('./RefundOperations.vue'))
 
-type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments'
+type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments' | 'refunds'
 const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<Plan[]>([]), orders = ref<Order[]>([]), entitlements = ref<Entitlement[]>([])
 const paymentMethods = ref<PaymentMethod[]>([]), paymentMethodsError = ref(''), paymentOrder = ref<Order | null>(null)
-const developmentMail = ref(false), verificationRequired = ref(false)
+const developmentMail = ref(false), verificationRequired = ref(false), paymentActionsEnabled = ref(false)
 const linkAction = ref<'verify' | 'reset' | null>(null), linkToken = ref('')
 const can = (permission: string) => !!user.value && (!verificationRequired.value || !!user.value.email_verified_at) && user.value.permissions?.includes(permission)
 const staff = computed(() => !!user.value && user.value.role !== 'user')
@@ -31,12 +32,12 @@ const now = ref(Date.now())
 const orderClock = window.setInterval(() => { now.value = Date.now() }, 1000)
 onBeforeUnmount(() => window.clearInterval(orderClock))
 const orderStatus = (order: Order): Order['status'] => order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() <= now.value ? 'expired' : order.status
-const orderStatusLabel = (order: Order) => ({ pending: '待支付', expired: '已超时', closed: '已关闭', paid: '已开通' }[orderStatus(order)])
+const orderStatusLabel = (order: Order) => ({ pending: '待支付', expired: '已超时', closing: '渠道关单中', closed: '已关闭', paid: '已开通', refunded: '已退款' }[orderStatus(order)])
 function closeOrder(order: Order) {
  if (!window.confirm('仅可关闭尚未发起外部付款的订单。关闭后无法继续使用此订单付款，是否继续？')) return
  return action(async () => { await api(`/orders/${encodeURIComponent(order.id)}/close`, {}); await personal(); notice.value = '订单已关闭。' })
 }
-const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号', payments: '支付流水' }
+const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号', payments: '支付流水', refunds: '退款管理' }
 const theme = { common: { primaryColor: '#21766b', primaryColorHover: '#185e55', primaryColorPressed: '#124d46', borderRadius: '10px', fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif' } }
 
 async function personal() {
@@ -53,7 +54,7 @@ async function action(task: () => Promise<void>) {
 async function load() {
  loading.value = true; error.value = ''
  try {
-  const [p, c] = await Promise.all([api<Plan[]>('/plans'), api<{ development_payments: boolean; development_mail: boolean; email_verification_required: boolean }>('/config')]); plans.value = p; development.value = c.development_payments; developmentMail.value = c.development_mail; verificationRequired.value = c.email_verification_required
+  const [p, c] = await Promise.all([api<Plan[]>('/plans'), api<{ development_payments: boolean; development_mail: boolean; email_verification_required: boolean; payment_actions_enabled?: boolean }>('/config')]); plans.value = p; development.value = c.development_payments; developmentMail.value = c.development_mail; verificationRequired.value = c.email_verification_required; paymentActionsEnabled.value = c.payment_actions_enabled === true
   const r = await fetch('/api/v1/me'); if (r.ok) user.value = await r.json(); else if (r.status !== 401) throw new Error('账号服务暂时不可用')
   await personal()
   await loadPaymentMethods()
@@ -120,10 +121,11 @@ onMounted(load)
      <button v-if="can('nodes.read')" :class="{ selected: view === 'nodes' }" @click="view = 'nodes'"><span class="nav-icon">◎</span>节点管理</button>
      <button v-if="can('access.read')" :class="{ selected: view === 'access' }" @click="view = 'access'"><span class="nav-icon">▧</span>权限管理</button>
      <button v-if="can('payments.read')" :class="{ selected: view === 'payments' }" @click="view = 'payments'"><span class="nav-icon">¥</span>支付流水</button>
+     <button v-if="can('refunds.read')" :class="{ selected: view === 'refunds' }" @click="view = 'refunds'"><span class="nav-icon">↶</span>退款管理</button>
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.9</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.10</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
@@ -134,7 +136,8 @@ onMounted(load)
      <div v-if="loading" class="loading">正在准备你的空间…</div>
      <template v-else>
       <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
-      <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" />
+      <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" :can-request-refund="can('refunds.request')" :can-close="can('payments.close')" :actions-enabled="paymentActionsEnabled" />
+      <RefundOperations v-if="view === 'refunds' && can('refunds.read')" :can-approve="can('refunds.approve')" :actions-enabled="paymentActionsEnabled" />
       <StaffManager v-if="view === 'staff' && can('users.read')" :can-manage-roles="can('users.roles')" />
       <NodeManager v-if="view === 'nodes' && can('nodes.read')" />
       <AccessManager v-if="view === 'access' && can('access.read')" />
@@ -153,7 +156,7 @@ onMounted(load)
       <template v-if="view === 'orders'">
        <div class="page-heading"><div><p class="eyebrow">YOUR ORDERS</p><h1>每一笔，都有记录。</h1><p>查看订单进度与已开通的套餐。</p></div><div class="payment-actions-inline"><NButton v-if="user" :loading="busy" @click="action(async () => { await personal(); await loadPaymentMethods() })">刷新订单</NButton><NButton @click="view = 'plans'">探索套餐 ↗</NButton></div></div>
        <p v-if="paymentMethodsError" role="alert" class="muted">{{ paymentMethodsError }}</p>
-       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id" :data-order-id="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small><small v-if="o.expires_at && orderStatus(o) === 'pending'" class="order-id">付款截止 {{ new Date(o.expires_at).toLocaleString('zh-CN') }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="orderStatus(o) === 'paid' ? 'success' : orderStatus(o) === 'pending' ? 'warning' : 'default'">{{ orderStatusLabel(o) }}</NTag></td><td><div class="payment-actions-inline"><template v-if="orderStatus(o) === 'pending'"><NButton v-if="paymentMethods.length" size="small" type="primary" :disabled="busy" @click="openPayment(o)">去支付</NButton><NButton v-if="development" size="small" :type="paymentMethods.length ? 'default' : 'primary'" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-if="!paymentMethods.length && !development" class="muted">{{ paymentMethodsError ? '支付渠道暂不可用' : '支付渠道待配置' }}</span></template><NButton v-if="orderStatus(o) === 'pending' || orderStatus(o) === 'expired'" size="small" :disabled="busy" title="仅关闭尚未发起外部付款的订单" @click="closeOrder(o)">关闭订单</NButton><span v-else class="muted">{{ o.status === 'paid' ? '已完成' : '订单已关闭' }}</span></div><p v-if="orderStatus(o) === 'expired'" class="muted order-expiry-note">已停止发起付款；已付款的订单仍会核实结果。</p></td></tr></tbody></table></div></section>
+       <section class="panel"><div v-if="!user || !orders.length" class="empty-state"><span class="empty-symbol">≡</span><h3>{{ user ? '还没有订单' : '登录后查看订单' }}</h3><p>你的购买记录会保存在这里。</p><NButton @click="user ? view = 'plans' : openAuth()">{{ user ? '选择套餐' : '登录账号' }}</NButton></div><div v-else class="table-wrap"><table><thead><tr><th>套餐 / 订单编号</th><th>金额</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="o in orders" :key="o.id" :data-order-id="o.id"><td><strong>{{ o.plan_name }}</strong><small class="order-id">{{ o.id.slice(0, 12) }}</small><small v-if="o.expires_at && orderStatus(o) === 'pending'" class="order-id">付款截止 {{ new Date(o.expires_at).toLocaleString('zh-CN') }}</small></td><td>¥{{ money(o.price_minor) }}</td><td>{{ date(o.created_at) }}</td><td><NTag size="small" round :type="orderStatus(o) === 'paid' ? 'success' : orderStatus(o) === 'pending' ? 'warning' : 'default'">{{ orderStatusLabel(o) }}</NTag></td><td><div class="payment-actions-inline"><template v-if="orderStatus(o) === 'pending'"><NButton v-if="paymentMethods.length" size="small" type="primary" :disabled="busy" @click="openPayment(o)">去支付</NButton><NButton v-if="development" size="small" :type="paymentMethods.length ? 'default' : 'primary'" :loading="busy" @click="settle(o)">确认测试支付</NButton><span v-if="!paymentMethods.length && !development" class="muted">{{ paymentMethodsError ? '支付渠道暂不可用' : '支付渠道待配置' }}</span></template><NButton v-if="orderStatus(o) === 'pending' || orderStatus(o) === 'expired'" size="small" :disabled="busy" title="仅关闭尚未发起外部付款的订单" @click="closeOrder(o)">关闭订单</NButton><span v-else class="muted">{{ o.status === 'paid' ? '已完成' : o.status === 'refunded' ? '已退款' : o.status === 'closing' ? '等待渠道确认关单' : '订单已关闭' }}</span></div><p v-if="orderStatus(o) === 'expired'" class="muted order-expiry-note">已停止发起付款；已付款的订单仍会核实结果。</p></td></tr></tbody></table></div></section>
       </template>
       <template v-if="view === 'admin' && (can('orders.read') || can('overview.read') || can('plans.write'))">
        <div class="page-heading"><div><p class="eyebrow">OPERATIONS</p><h1>运营工作台</h1><p>查看平台业务记录，管理当前在售套餐。</p></div><NButton v-if="can('plans.write')" type="primary" @click="planOpen = true">＋ 新建套餐</NButton></div>

@@ -23,11 +23,12 @@ import (
 )
 
 type Config struct {
-	Origin          string
-	Development     bool
-	SecureCookies   bool
-	RequireVerified bool
-	Payments        *payments.Registry
+	Origin                string
+	Development           bool
+	SecureCookies         bool
+	RequireVerified       bool
+	Payments              *payments.Registry
+	PaymentActionsEnabled bool
 	// PasswordCost defaults to bcrypt.DefaultCost. Tests can use bcrypt.MinCost
 	// to exercise authentication without race-instrumentation CPU amplification.
 	PasswordCost int
@@ -55,7 +56,7 @@ func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", s.health)
 	m.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, 200, map[string]bool{"development_payments": s.Config.Development, "development_mail": s.Config.Development, "email_verification_required": s.Config.RequireVerified})
+		reply(w, 200, map[string]bool{"development_payments": s.Config.Development, "development_mail": s.Config.Development, "email_verification_required": s.Config.RequireVerified, "payment_actions_enabled": s.Config.PaymentActionsEnabled})
 	})
 	m.HandleFunc("POST /api/v1/auth/register", s.register)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -88,6 +89,10 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/admin/payment-activity", s.adminRecentPaymentActivity)
 	m.HandleFunc("GET /api/v1/admin/payments/{id}/activity", s.adminPaymentActivity)
 	m.HandleFunc("POST /api/v1/admin/payments/{id}/retry", s.retryPaymentReconciliation)
+	m.HandleFunc("POST /api/v1/admin/payments/{id}/refund", s.requestRefund)
+	m.HandleFunc("POST /api/v1/admin/payments/{id}/close", s.requestGatewayClose)
+	m.HandleFunc("GET /api/v1/admin/refunds", s.listRefunds)
+	m.HandleFunc("POST /api/v1/admin/refunds/{id}/approve", s.approveRefund)
 	m.HandleFunc("GET /api/v1/me/entitlements", s.entitlements)
 	m.HandleFunc("POST /api/v1/dev/orders/{id}/settle", s.devSettle)
 	m.HandleFunc("GET /api/v1/admin/overview", s.overview)

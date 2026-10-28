@@ -293,7 +293,7 @@ func TestWechatNotificationRejectsTamperingStaleAndDuplicateHeaders(t *testing.T
 
 func TestWechatQueryRejectsUntrustedResponsesAndCrossOrderData(t *testing.T) {
 	c, key := wctConfig(t)
-	for _, mutation := range []string{"signature", "serial", "stale", "unsigned", "amount", "payment", "merchant", "currency", "oversized", "redirect", "pending", "not-found"} {
+	for _, mutation := range []string{"signature", "serial", "stale", "unsigned", "amount", "payment", "merchant", "currency", "oversized", "redirect", "pending", "closed", "not-found"} {
 		t.Run(mutation, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				transaction := wctTransaction(c)
@@ -307,6 +307,9 @@ func TestWechatQueryRejectsUntrustedResponsesAndCrossOrderData(t *testing.T) {
 					transaction["mchid"] = "other-merchant"
 				case "currency":
 					transaction["amount"] = map[string]any{"total": 1901, "currency": "USD"}
+				case "closed":
+					transaction["trade_state"] = "CLOSED"
+					delete(transaction, "transaction_id")
 				case "pending":
 					transaction["trade_state"] = "NOTPAY"
 					delete(transaction, "transaction_id")
@@ -348,8 +351,8 @@ func TestWechatQueryRejectsUntrustedResponsesAndCrossOrderData(t *testing.T) {
 				t.Fatal(err)
 			}
 			n, err := p.Query(context.Background(), wctRequest())
-			if mutation == "pending" {
-				if err != nil || n.Paid {
+			if mutation == "pending" || mutation == "closed" {
+				if err != nil || n.Paid || n.Closed != (mutation == "closed") {
 					t.Fatal("pending query", n, err)
 				}
 				return
