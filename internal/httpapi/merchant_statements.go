@@ -23,7 +23,7 @@ const statementImportBodyLimit = 2 << 20
 func statementValidationMessage(err error) string {
 	fallback := "账单格式不正确，请按标准 CSV 模板核对日期、标识、金额和行数"
 	var validation *statements.ValidationError
-	if !errors.As(err, &validation) || validation.Line < 0 || validation.Line > statements.MaxBytes+1 {
+	if !errors.As(err, &validation) || validation.Line < 0 || validation.Line > statements.MaxNativeExpandedBytes+1 {
 		return fallback
 	}
 	fields := map[string]string{
@@ -31,6 +31,7 @@ func statementValidationMessage(err error) string {
 		"csv": "CSV 文件", "header": "账单表头", "payment_id": "商户支付单号",
 		"transaction_id": "渠道交易号", "refund_id": "商户退款单号", "provider_refund_id": "渠道退款号",
 		"amount_minor": "金额（分）", "currency": "币种", "occurred_at": "发生时间",
+		"format": "原始账单版本", "content_base64": "原始账单文件",
 	}
 	field, known := fields[validation.Field]
 	if !known {
@@ -64,6 +65,22 @@ func statementValidationMessage(err error) string {
 		message = "账单金额或金额合计超出支持范围"
 	case "outside_date":
 		message = "发生时间不在所选北京时间日期内"
+	case "unsupported_native_format":
+		message = "不支持此原始账单版本或渠道类型，请使用支持的版本或标准 CSV"
+	case "invalid_native_record":
+		message = "原始账单记录格式不正确，请核对文件编码、字段和金额"
+	case "invalid_native_summary":
+		message = "原始账单汇总缺失或与明细不一致，不能确认导入范围"
+	case "native_merchant_mismatch":
+		message = "原始账单商户信息不一致或包含暂不支持的子商户范围"
+	case "native_archive_invalid":
+		message = "原始账单压缩文件不完整、结构不支持或校验未通过"
+	case "native_too_large":
+		message = "原始账单文件或解压内容不能超过 8 MiB"
+	case "native_empty":
+		message = "无法确认空账单，请核对原始文件和支持的账单版本"
+	case "native_partial_only":
+		message = "此支付宝原始账单版本仅支持按部分账单核对"
 	default:
 		return fallback
 	}

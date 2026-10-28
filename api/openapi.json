@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.11.0",
-    "description": "Independent subscription platform with verified payment adapters, approved full refunds and durable gateway closure. Adds normalized manual CSV statement import, consistent-snapshot payment/refund discrepancy reports, immutable report revisions and append-only review notes. Imported files and review labels never mutate financial facts or entitlements. Official statement download, native provider CSV adapters and real merchant acceptance remain pending."
+    "version": "0.12.0",
+    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds conservative native Alipay/WeChat format profiles, immutable source provenance, and opt-in on-demand authenticated merchant bill download jobs. Imported and downloaded bills never settle/refund or change entitlements. Classic Alipay profile is partial-only and not real-merchant accepted; daily scheduling, broader formats, fees/settlement reconciliation and real merchant acceptance remain pending."
   },
   "paths": {
     "/healthz": {
@@ -3749,6 +3749,151 @@
           }
         ]
       }
+    },
+    "/api/v1/admin/statements/native": {
+      "post": {
+        "summary": "Staff: import a supported native bill profile",
+        "operationId": "post_api_v1_admin_statements_native",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.import",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Max12MiB singleJSON. Rate5 per direct peer and5 per user per minute for native-import. Alipay classic profile is fixture-limited, partial-only and refuses empty selected type; it does not claim current merchant acceptance. WeChat uses gross order/requested-refund amount and explicit refund-success time, with strict summary count/sum. Valid canonical content can reuse an existing statement/report while appending immutable source audit. Native upload works with bill downloads disabled.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed input/date/query/profile;401 unauthenticated;403 role/email/security change;409 unsupported channel/state or retryable conflict/limit;429 shared rate limit;503 disabled/not configured/database unavailable. Finite sanitized errors never echo source rows, URLs, tokens or credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeStatementImport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/bill-downloads": {
+      "get": {
+        "summary": "Staff: latest100 sanitized bill download jobs",
+        "operationId": "get_api_v1_admin_bill-downloads",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Reading remains available when BILL_DOWNLOADS_ENABLED isfalse. Each result exposes finite state/outcome and imported statement reference only.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillDownloadList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed input/date/query/profile;401 unauthenticated;403 role/email/security change;409 unsupported channel/state or retryable conflict/limit;429 shared rate limit;503 disabled/not configured/database unavailable. Finite sanitized errors never echo source rows, URLs, tokens or credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Staff: queue or resume an on-demand merchant bill download",
+        "operationId": "post_api_v1_admin_bill-downloads",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.download",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Requires explicit BILL_DOWNLOADS_ENABLED=true and configured optional BillProvider capability (Alipay/WeChat only, no common Epay protocol). Request performs no outboundI/O. Rate5 per direct peer and5 per user per minute for bill-download. One job per provider/kind/date/merchant fingerprint; repeats of active/succeeded jobs reuse it and manual_required may reset under fresh current actor/security version. Background worker uses60s token lease,25s operation,5s database finish, fresh signed metadata URL per retry, no externalI/O under financial locks. Gateway/verification/storage/not-ready errors retry30..1800s,8failures or7days thenmanual; parse/profile, unsupported and actor/merchant change become manual immediately. Signed metadata and strict HTTPS origin/path/no redirect constrain downloads. WeChat GZIP original uncompressed bytes must match signed SHA1; Alipay requests secure=true and verifies signed URL but classic results remain partial. No daily scheduler and no raw files or URLs are persisted. Success/import/report/source/job completion commit atomically.",
+        "responses": {
+          "200": {
+            "description": "Success (queueing does not mean imported)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillDownloadJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed input/date/query/profile;401 unauthenticated;403 role/email/security change;409 unsupported channel/state or retryable conflict/limit;429 shared rate limit;503 disabled/not configured/database unavailable. Finite sanitized errors never echo source rows, URLs, tokens or credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillDownloadRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4111,6 +4256,10 @@
           "payment_actions_enabled": {
             "type": "boolean",
             "description": "Explicit PAYMENT_ACTIONS_ENABLED=true; otherwise approval and gateway close return503 and action worker is stopped. Refund drafts remain available."
+          },
+          "bill_downloads_enabled": {
+            "type": "boolean",
+            "description": "Explicit BILL_DOWNLOADS_ENABLED=true; otherwise queue requests return503 and the download worker is stopped. Manual/native imports and job reads remain available. Independent of PAYMENT_ACTIONS_ENABLED. Optional to retain older-client fixture compatibility."
           }
         },
         "required": [
@@ -6156,6 +6305,14 @@
             "items": {
               "$ref": "#/components/schemas/MerchantStatementRun"
             }
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/MerchantStatementSource"
+            },
+            "description": "Latest20 immutable source records; old normalized imports are backfilled. New native source can reuse the same canonical statement/report. Optional for older-client compatibility."
           }
         },
         "required": [
@@ -6405,6 +6562,364 @@
           "total",
           "offset",
           "limit"
+        ]
+      },
+      "MerchantStatementSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "statement_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "normalized_csv_v1",
+              "alipay_trade_v1",
+              "wechat_success_v1",
+              "wechat_refund_v1"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "upload",
+              "download"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "integrity": {
+            "type": "string",
+            "enum": [
+              "unverified_upload",
+              "wechat_signed_sha1",
+              "alipay_signed_url"
+            ],
+            "description": "Transport/content provenance only; never authenticated payment/refund success. WeChat verifies signed metadata plus SHA1 of uncompressed file; Alipay verifies signed HTTPS download URL, not a standalone ZIP payment signature."
+          },
+          "merchant_fingerprint": {
+            "type": "string",
+            "pattern": "^([0-9a-f]{64})?$",
+            "description": "Empty for uploads; hash of configured provider/application/merchant identity for downloads. Signing-key rotation does not change it."
+          },
+          "download_job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "imported_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "statement_id",
+          "format",
+          "kind",
+          "digest",
+          "integrity",
+          "merchant_fingerprint",
+          "download_job_id",
+          "imported_by",
+          "created_at"
+        ]
+      },
+      "NativeStatementImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+            "description": "Exact valid calendar date in years2000..2099, using the Shanghai UTC+08 day [00:00,next00:00)."
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "Explicit scope. Alipay classic profile is partial only and nonempty selected records are required. Manual WeChat full is an operator assertion after strict summary validation; reverse findings are timing candidates."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "alipay_trade_v1",
+              "wechat_success_v1",
+              "wechat_refund_v1"
+            ]
+          },
+          "content_base64": {
+            "type": "string",
+            "format": "byte",
+            "minLength": 4,
+            "maxLength": 11184812,
+            "description": "Strict standard Base64 of <=8MiB raw input. Total JSON limit12MiB; decompression budget8MiB; max2000 native/normalized rows and normalizedCSV<=1MiB. Upload bytes are unverified observations. Alipay classic25-column UTF8/strictGBK CSV or bounded single-detail ZIP; WeChat exactmodern20/29-column UTF8CSV orGZIP, known7-column summary count/gross validation. No raw files, filenames or URLs retained."
+          }
+        },
+        "required": [
+          "provider",
+          "kind",
+          "date",
+          "coverage",
+          "format",
+          "content_base64"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "alipay"
+                }
+              },
+              "required": [
+                "provider"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "const": "alipay_trade_v1"
+                },
+                "coverage": {
+                  "const": "partial"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "wechat"
+                },
+                "kind": {
+                  "const": "payment"
+                }
+              },
+              "required": [
+                "provider",
+                "kind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "const": "wechat_success_v1"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "provider": {
+                  "const": "wechat"
+                },
+                "kind": {
+                  "const": "refund"
+                }
+              },
+              "required": [
+                "provider",
+                "kind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "const": "wechat_refund_v1"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "BillDownloadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+            "description": "A valid Shanghai calendar day strictly before today and no earlier than90days before today. Browser cannot provide a URL, token or merchant identity."
+          }
+        },
+        "required": [
+          "provider",
+          "kind",
+          "date"
+        ]
+      },
+      "BillDownloadJob": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "waiting",
+              "succeeded",
+              "manual_required"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_outcome": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "retry_scheduled",
+              "succeeded",
+              "gateway_error",
+              "verification_error",
+              "parse_error",
+              "unsupported",
+              "provider_unavailable",
+              "merchant_changed",
+              "actor_changed",
+              "not_ready",
+              "manual_required",
+              "storage_error"
+            ]
+          },
+          "statement_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "requested_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "kind",
+          "date",
+          "status",
+          "attempts",
+          "last_outcome",
+          "statement_id",
+          "requested_by",
+          "created_at",
+          "updated_at",
+          "next_attempt_at",
+          "completed_at"
+        ],
+        "description": "Sanitized durable job. Queued is not imported. Unique provider/kind/date/merchant fingerprint survives key rotation; manual-required repeat can resume the same ID under a fresh authorized actor/security version. succeeded has statement/completion references. No downloadURL, raw content, tokens, claim lease or merchant credentials exposed. No daily cron is implied."
+      },
+      "BillDownloadList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/BillDownloadJob"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       }
     }

@@ -127,7 +127,7 @@ func (w *wechatProvider) verifyHeaders(header http.Header, body []byte) error {
 func (w *wechatProvider) call(ctx context.Context, method, path string, body []byte) ([]byte, error) {
 	return w.callStatus(ctx, method, path, body, http.StatusOK)
 }
-func (w *wechatProvider) callStatus(ctx context.Context, method, path string, body []byte, successStatus int) ([]byte, error) {
+func (w *wechatProvider) signedRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return nil, ErrGateway
@@ -148,6 +148,14 @@ func (w *wechatProvider) callStatus(ctx context.Context, method, path string, bo
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Wechatpay-Serial", w.config.PlatformSerial)
 	r.Header.Set("Authorization", fmt.Sprintf(`WECHATPAY2-SHA256-RSA2048 mchid="%s",nonce_str="%s",timestamp="%s",serial_no="%s",signature="%s"`, w.config.MchID, nonce, timestamp, w.config.Serial, base64.StdEncoding.EncodeToString(signature)))
+	return r, nil
+}
+
+func (w *wechatProvider) callStatus(ctx context.Context, method, path string, body []byte, successStatus int) ([]byte, error) {
+	r, err := w.signedRequest(ctx, method, path, body)
+	if err != nil {
+		return nil, err
+	}
 	response, err := w.client.Do(r)
 	if err != nil {
 		return nil, ErrGateway

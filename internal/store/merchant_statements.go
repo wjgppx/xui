@@ -38,9 +38,10 @@ type StatementRun struct {
 	CreatedBy           string    `json:"created_by"`
 }
 type StatementDetail struct {
-	Statement Statement      `json:"statement"`
-	LatestRun StatementRun   `json:"latest_run"`
-	Runs      []StatementRun `json:"runs"`
+	Statement Statement         `json:"statement"`
+	LatestRun StatementRun      `json:"latest_run"`
+	Runs      []StatementRun    `json:"runs"`
+	Sources   []StatementSource `json:"sources"`
 }
 type StatementSummary struct {
 	Statement
@@ -146,7 +147,9 @@ func statementDetail(ctx context.Context, q statementQuery, id string) (Statemen
 		return d, ErrNotFound
 	}
 	d.LatestRun = d.Runs[0]
-	return d, nil
+	rows.Close()
+	d.Sources, err = statementSources(ctx, q, id)
+	return d, err
 }
 func (s *Store) Statement(ctx context.Context, id string) (StatementDetail, error) {
 	tx, err := s.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -191,13 +194,25 @@ func (s *Store) ImportStatement(ctx context.Context, actor string, input stateme
 	if err = actionActor(ctx, tx, actor, -1, false); err != nil {
 		return StatementDetail{}, statementError(err)
 	}
+	detail, err := importStatementDocument(ctx, tx, actor, document, statementSourceInput{Format: "normalized_csv_v1", Kind: "upload", Digest: document.Digest, Integrity: "unverified_upload"})
+	if err != nil {
+		return detail, statementError(err)
+	}
+	return detail, statementError(tx.Commit(ctx))
+}
+func importStatementDocument(ctx context.Context, tx pgx.Tx, actor string, document statements.Document, source statementSourceInput) (StatementDetail, error) {
 	existing, err := scanStatement(tx.QueryRow(ctx, `SELECT `+statementColumns+` FROM merchant_statements WHERE provider=$1 AND kind=$2 AND business_date=$3::date AND coverage=$4 AND digest=$5`, document.Provider, document.Kind, document.Date, document.Coverage, document.Digest))
 	if err == nil {
-		d, e := statementDetail(ctx, tx, existing.ID)
+		added, e := addStatementSource(ctx, tx, actor, existing.ID, source)
 		if e != nil {
-			return d, e
+			return StatementDetail{}, e
 		}
-		return d, statementError(tx.Commit(ctx))
+		if added {
+			if e = actionAudit(ctx, tx, actor, "statement.source_recorded", existing.ID); e != nil {
+				return StatementDetail{}, e
+			}
+		}
+		return statementDetail(ctx, tx, existing.ID)
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return StatementDetail{}, err
@@ -220,14 +235,13 @@ func (s *Store) ImportStatement(ctx context.Context, actor string, input stateme
 	if _, err = statementReconcile(ctx, tx, actor, id, document); err != nil {
 		return StatementDetail{}, statementError(err)
 	}
+	if _, err = addStatementSource(ctx, tx, actor, id, source); err != nil {
+		return StatementDetail{}, statementError(err)
+	}
 	if err = actionAudit(ctx, tx, actor, "statement.imported", id); err != nil {
 		return StatementDetail{}, err
 	}
-	d, err := statementDetail(ctx, tx, id)
-	if err != nil {
-		return d, err
-	}
-	return d, statementError(tx.Commit(ctx))
+	return statementDetail(ctx, tx, id)
 }
 func (s *Store) ReconcileStatement(ctx context.Context, actor, id string) (StatementRun, error) {
 	tx, err := s.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})

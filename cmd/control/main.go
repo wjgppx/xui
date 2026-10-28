@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wjgppx/xui/internal/billfetch"
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/mailer"
 	"github.com/wjgppx/xui/internal/paymentactions"
@@ -115,6 +116,11 @@ func main() {
 		slog.Error("payment action configuration invalid")
 		os.Exit(1)
 	}
+	billDownloadsEnabled, err := payments.BillDownloadsEnabledFromEnvironment()
+	if err != nil {
+		slog.Error("bill download configuration invalid")
+		os.Exit(1)
+	}
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
@@ -135,7 +141,12 @@ func main() {
 		go func() { defer close(actionDone); paymentactions.Run(ctx, s, registry, origin) }()
 		defer func() { stop(); <-actionDone }()
 	}
-	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled})
+	if billDownloadsEnabled {
+		billDone := make(chan struct{})
+		go func() { defer close(billDone); billfetch.Run(ctx, s, registry) }()
+		defer func() { stop(); <-billDone }()
+	}
+	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled, BillDownloadsEnabled: billDownloadsEnabled})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

@@ -29,6 +29,7 @@ type Config struct {
 	RequireVerified       bool
 	Payments              *payments.Registry
 	PaymentActionsEnabled bool
+	BillDownloadsEnabled  bool
 	// PasswordCost defaults to bcrypt.DefaultCost. Tests can use bcrypt.MinCost
 	// to exercise authentication without race-instrumentation CPU amplification.
 	PasswordCost int
@@ -56,7 +57,7 @@ func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", s.health)
 	m.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, 200, map[string]bool{"development_payments": s.Config.Development, "development_mail": s.Config.Development, "email_verification_required": s.Config.RequireVerified, "payment_actions_enabled": s.Config.PaymentActionsEnabled})
+		reply(w, 200, map[string]bool{"development_payments": s.Config.Development, "development_mail": s.Config.Development, "email_verification_required": s.Config.RequireVerified, "payment_actions_enabled": s.Config.PaymentActionsEnabled, "bill_downloads_enabled": s.Config.BillDownloadsEnabled})
 	})
 	m.HandleFunc("POST /api/v1/auth/register", s.register)
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
@@ -95,6 +96,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/refunds/{id}/approve", s.approveRefund)
 	m.HandleFunc("GET /api/v1/admin/statements", s.adminStatements)
 	m.HandleFunc("POST /api/v1/admin/statements", s.importStatement)
+	m.HandleFunc("POST /api/v1/admin/statements/native", s.importNativeStatement)
+	m.HandleFunc("GET /api/v1/admin/bill-downloads", s.adminBillDownloads)
+	m.HandleFunc("POST /api/v1/admin/bill-downloads", s.requestBillDownload)
 	m.HandleFunc("GET /api/v1/admin/statements/{id}", s.adminStatement)
 	m.HandleFunc("POST /api/v1/admin/statements/{id}/reconcile", s.reconcileStatement)
 	m.HandleFunc("GET /api/v1/admin/statements/{id}/runs/{runID}/findings", s.statementFindings)

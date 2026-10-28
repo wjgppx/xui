@@ -16,6 +16,16 @@ func FromEnvironment() (*Registry, error) { return loadEnvironment(os.Getenv) }
 func ActionsEnabledFromEnvironment() (bool, error) {
 	return actionsEnabled(os.Getenv("PAYMENT_ACTIONS_ENABLED"))
 }
+func BillDownloadsEnabledFromEnvironment() (bool, error) {
+	switch strings.TrimSpace(os.Getenv("BILL_DOWNLOADS_ENABLED")) {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, errors.New("BILL_DOWNLOADS_ENABLED must be true or false")
+	}
+}
 func actionsEnabled(value string) (bool, error) {
 	switch strings.TrimSpace(value) {
 	case "", "false":

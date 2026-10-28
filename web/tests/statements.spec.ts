@@ -39,6 +39,7 @@ async function fixture(page: Page, options: { seed?: boolean; role?: 'finance' |
   if (path === '/api/v1/me') return reply({ id: role, email: `${role}@example.test`, role, permissions, email_verified_at: created })
   if (['/api/v1/plans', '/api/v1/payment-methods', '/api/v1/orders', '/api/v1/me/entitlements', '/api/v1/admin/orders'].includes(path)) return reply([])
   if (path.includes('/admin/statements') || path.includes('/admin/statement-findings')) state.statementRequests++
+  if (path === '/api/v1/admin/bill-downloads' && method === 'GET') return reply({ items: [] })
   if (path === '/api/v1/admin/statements' && method === 'GET') return reply({ items: state.summaries })
   if (path === '/api/v1/admin/statements' && method === 'POST') {
    const body = request.postDataJSON(); state.imports.push(body)
