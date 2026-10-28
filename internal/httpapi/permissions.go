@@ -6,9 +6,9 @@ import (
 )
 
 var rolePermissions = map[string][]string{
-	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download"},
+	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule"},
 	"support":  {"orders.read", "users.read"},
-	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download"},
+	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule"},
 	"operator": {"nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry"},
 	"user":     {},
 }
@@ -25,6 +25,14 @@ func permitted(role, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/admin/bill-schedules":
+		if r.Method == "GET" {
+			return "statements.read"
+		}
+		if r.Method == "PUT" {
+			return "statements.schedule"
+		}
+		return "unmapped.deny"
 	case p == "/api/v1/admin/bill-downloads":
 		if r.Method == "GET" {
 			return "statements.read"

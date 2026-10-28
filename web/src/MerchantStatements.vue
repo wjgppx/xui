@@ -2,8 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NInput, NModal, NTag } from 'naive-ui'
 import { api, type BillDownloadJob, type PaymentMethod, type StatementDetail, type StatementFinding, type StatementFindingsPage, type StatementReview, type StatementRun, type StatementSummary } from './api'
+import BillSchedules from './BillSchedules.vue'
 
-const props = defineProps<{ canImport: boolean; canReconcile: boolean; canReview: boolean; canDownload: boolean; billDownloadsEnabled: boolean }>()
+const props = defineProps<{ canImport: boolean; canReconcile: boolean; canReview: boolean; canDownload: boolean; canSchedule: boolean; billDownloadsEnabled: boolean }>()
 const statements = ref<StatementSummary[]>([]), detail = ref<StatementDetail | null>(null), run = ref<StatementRun | null>(null)
 const findings = ref<StatementFindingsPage>({ items: [], total: 0, offset: 0, limit: 100 })
 const reviewFilter = ref<'all' | 'unreviewed' | 'reviewed'>('all')
@@ -51,7 +52,7 @@ const nativeFormats = [
 const sourceFormat = (value: string) => value === 'normalized_csv_v1' ? '标准 CSV' : nativeFormats.find(item => item.value === value)?.label || value
 const sourceIntegrity = (value: string) => ({ unverified_upload: '未验证渠道来源', wechat_signed_sha1: '已校验下载内容；仅用于对账', alipay_signed_url: '已验签下载地址，经 HTTPS 获取' }[value] || '未确认来源校验方式')
 const downloadStatus = (value: string) => ({ queued: '等待下载', processing: '正在获取账单', waiting: '等待重试', succeeded: '已导入账单', manual_required: '需要人工处理' }[value] || value)
-const downloadOutcome = (value: string) => ({ gateway_error: '渠道暂时不可用', verification_error: '渠道校验未通过', parse_error: '原始文件未通过格式校验', unsupported: '渠道或格式暂不支持', provider_unavailable: '渠道未配置', merchant_changed: '商户配置已变化', actor_changed: '任务授权已变化', not_ready: '渠道账单尚未生成', manual_required: '需要重新核对任务', storage_error: '存储暂时不可用', succeeded: '账单已保存', queued: '任务已排队', requested: '任务已排队', retry_scheduled: '已安排重试' }[value] || (value ? '等待核查处理结果' : '—'))
+const downloadOutcome = (value: string) => ({ gateway_error: '渠道暂时不可用', verification_error: '渠道校验未通过', parse_error: '原始文件未通过格式校验', unsupported: '渠道或格式暂不支持', provider_unavailable: '渠道未配置', merchant_changed: '商户配置已变化', actor_changed: '任务授权已变化', schedule_changed: '自动拉取计划或授权已变化', not_ready: '渠道账单尚未生成', manual_required: '需要重新核对任务', storage_error: '存储暂时不可用', succeeded: '账单已保存', queued: '任务已排队', requested: '任务已排队', retry_scheduled: '已安排重试' }[value] || (value ? '等待核查处理结果' : '—'))
 
 async function action(task: () => Promise<void>) {
  if (busy.value) return
@@ -300,6 +301,8 @@ onBeforeUnmount(() => { alive = false; clearImport(); clearNative(); clearReview
   <div v-if="downloads.length" class="table-wrap"><table><thead><tr><th>账单日期 / 渠道</th><th>类型 / 进度</th><th>处理结果</th><th>操作</th></tr></thead><tbody><tr v-for="job in downloads" :key="job.id" :data-download-id="job.id"><td><strong>{{ job.date }}</strong><small class="statement-detail">{{ providerLabel(job.provider) }}</small><small class="statement-detail statement-reference">任务 {{ job.id.slice(0, 12) }}</small></td><td>{{ kindLabel(job.kind) }}<small class="statement-detail"><NTag size="small" :type="job.status === 'succeeded' ? 'success' : job.status === 'manual_required' ? 'error' : 'warning'">{{ downloadStatus(job.status) }}</NTag></small></td><td><span class="statement-detail">{{ downloadOutcome(job.last_outcome) }}</span><small class="statement-detail">连续失败 {{ job.attempts }} 次</small><small v-if="job.next_attempt_at && (job.status === 'queued' || job.status === 'waiting')" class="statement-detail">下次 {{ time(job.next_attempt_at) }}</small><small v-if="job.completed_at" class="statement-detail">保存 {{ time(job.completed_at) }}</small></td><td><NButton v-if="job.status === 'succeeded' && job.statement_id" size="small" :disabled="busy" @click="selectStatement(job.statement_id)">打开已导入账单</NButton><NButton v-else-if="job.status === 'manual_required' && canDownload" size="small" :disabled="busy || !billDownloadsEnabled" @click="openDownload(job)">重新提交下载</NButton><span v-else class="muted">{{ job.status === 'manual_required' ? '等待人工核查' : '尚未导入账单' }}</span></td></tr></tbody></table></div>
   <p v-else class="muted">暂无下载任务。手动上传原始文件和标准账单不需要启用官方下载。</p>
  </section>
+
+ <BillSchedules :can-manage="canSchedule" :downloads-enabled="billDownloadsEnabled" />
 
  <section v-if="detail && run" class="panel statement-panel" data-testid="statement-report">
   <div class="section-title statement-report-heading"><div><h2>{{ detail.statement.date }} · {{ providerLabel(detail.statement.provider) }} · {{ kindLabel(detail.statement.kind) }}对账</h2><p class="muted">{{ coverageLabel(detail.statement.coverage) }} · 查询时间 {{ time(run.as_of) }}（北京时间）</p></div><NButton v-if="canReconcile" :loading="busy" @click="reconcile">重新对账</NButton></div>

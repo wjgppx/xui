@@ -26,6 +26,7 @@ async function fixture(page: Page, enabled = false) {
   if (path === '/api/v1/me') return reply({ id: 'finance', email: 'finance@example.test', role: 'finance', permissions: ['statements.read', 'statements.import', 'statements.reconcile', 'statements.review', 'statements.download'], email_verified_at: created })
   if (['/api/v1/plans', '/api/v1/payment-methods', '/api/v1/orders', '/api/v1/me/entitlements'].includes(path)) return reply([])
   if (path === '/api/v1/admin/bill-downloads' && method === 'GET') return reply({ items: state.jobs })
+  if (path === '/api/v1/admin/bill-schedules' && method === 'GET') return reply({ items: [] })
   if (path === '/api/v1/admin/bill-downloads' && method === 'POST') { const body = req.postDataJSON(); state.jobPosts.push(body); const job = { ...queuedJob(), ...body }; state.jobs = [job]; return reply(job) }
   if (path === '/api/v1/admin/statements') return reply({ items: state.summaries })
   if (path === '/api/v1/admin/statements/native') {

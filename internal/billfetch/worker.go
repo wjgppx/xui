@@ -18,6 +18,9 @@ func downloadOutcome(ctx context.Context, s *store.Store, registry *payments.Reg
 	if errors.Is(err, store.ErrRoleForbidden) {
 		return "actor_changed", nil
 	}
+	if errors.Is(err, store.ErrBillScheduleChanged) {
+		return "schedule_changed", nil
+	}
 	if err != nil {
 		return "storage_error", err
 	}
@@ -67,6 +70,9 @@ func downloadOutcome(ctx context.Context, s *store.Store, registry *payments.Reg
 	importCancel()
 	if errors.Is(err, store.ErrRoleForbidden) {
 		return "actor_changed", nil
+	}
+	if errors.Is(err, store.ErrBillScheduleChanged) {
+		return "schedule_changed", nil
 	}
 	if err != nil {
 		return "storage_error", err

@@ -99,6 +99,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/statements/native", s.importNativeStatement)
 	m.HandleFunc("GET /api/v1/admin/bill-downloads", s.adminBillDownloads)
 	m.HandleFunc("POST /api/v1/admin/bill-downloads", s.requestBillDownload)
+	m.HandleFunc("GET /api/v1/admin/bill-schedules", s.adminBillSchedules)
+	m.HandleFunc("PUT /api/v1/admin/bill-schedules", s.updateBillSchedule)
 	m.HandleFunc("GET /api/v1/admin/statements/{id}", s.adminStatement)
 	m.HandleFunc("POST /api/v1/admin/statements/{id}/reconcile", s.reconcileStatement)
 	m.HandleFunc("GET /api/v1/admin/statements/{id}/runs/{runID}/findings", s.statementFindings)

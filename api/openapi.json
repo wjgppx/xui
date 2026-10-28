@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.12.0",
-    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds conservative native Alipay/WeChat format profiles, immutable source provenance, and opt-in on-demand authenticated merchant bill download jobs. Imported and downloaded bills never settle/refund or change entitlements. Classic Alipay profile is partial-only and not real-merchant accepted; daily scheduling, broader formats, fees/settlement reconciliation and real merchant acceptance remain pending."
+    "version": "0.13.0",
+    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds opt-in daily Alipay/WeChat bill schedules with fixed Shanghai time, bounded seven-day catch-up, stable download identities, revision conflicts and revocable actor/merchant authorization. Global downloads and all four schedules default off. Imported and downloaded bills never settle/refund or change entitlements. Classic Alipay profile remains partial-only; broader formats, fees/settlement reconciliation and real merchant acceptance remain pending."
   },
   "paths": {
     "/healthz": {
@@ -3849,7 +3849,7 @@
           }
         ],
         "x-required-permission": "statements.download",
-        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Requires explicit BILL_DOWNLOADS_ENABLED=true and configured optional BillProvider capability (Alipay/WeChat only, no common Epay protocol). Request performs no outboundI/O. Rate5 per direct peer and5 per user per minute for bill-download. One job per provider/kind/date/merchant fingerprint; repeats of active/succeeded jobs reuse it and manual_required may reset under fresh current actor/security version. Background worker uses60s token lease,25s operation,5s database finish, fresh signed metadata URL per retry, no externalI/O under financial locks. Gateway/verification/storage/not-ready errors retry30..1800s,8failures or7days thenmanual; parse/profile, unsupported and actor/merchant change become manual immediately. Signed metadata and strict HTTPS origin/path/no redirect constrain downloads. WeChat GZIP original uncompressed bytes must match signed SHA1; Alipay requests secure=true and verifies signed URL but classic results remain partial. No daily scheduler and no raw files or URLs are persisted. Success/import/report/source/job completion commit atomically.",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Requires explicit BILL_DOWNLOADS_ENABLED=true and configured optional BillProvider capability (Alipay/WeChat only, no common Epay protocol). Request performs no outboundI/O. Rate5 per direct peer and5 per user per minute for bill-download. One job per provider/kind/date/merchant fingerprint; repeats of active/succeeded jobs reuse it and manual_required may reset under fresh current actor/security version. Background worker uses60s token lease,25s operation,5s database finish, fresh signed metadata URL per retry, no externalI/O under financial locks. Gateway/verification/storage/not-ready errors retry30..1800s,8failures or7days thenmanual; parse/profile, unsupported and actor/merchant change become manual immediately. Signed metadata and strict HTTPS origin/path/no redirect constrain downloads. WeChat GZIP original uncompressed bytes must match signed SHA1; Alipay requests secure=true and verifies signed URL but classic results remain partial. Daily schedules may generate the same job identity; an explicit retry of manual_required detaches obsolete schedule authorization. Invalid automatic authorization becomes schedule_changed/manual_required. No raw files or URLs are persisted. Success/import/report/source/job completion commit atomically.",
         "responses": {
           "200": {
             "description": "Success (queueing does not mean imported)",
@@ -3889,6 +3889,95 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BillDownloadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/bill-schedules": {
+      "get": {
+        "summary": "Staff: list four daily merchant bill schedules",
+        "operationId": "get_api_v1_admin_bill-schedules",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; verified email required in production. Rejects query parameters. Reading remains available when BILL_DOWNLOADS_ENABLED isfalse. Returns fixed Shanghai schedule, finite pause state and cursor without private merchant authorization data.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillScheduleList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/unknown/missing fields, invalid provider/kind/time/revision or query;401 unauthenticated;403 role/email/security change;409 stale revision (refresh and retry) or unsupported provider capability;429 shared rate limit;503 global gate disabled for enabling, provider not configured or database unavailable. Sanitized errors never echo credentials, merchant URLs or file contents.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Staff: configure or disable a daily merchant bill schedule",
+        "operationId": "put_api_v1_admin_bill-schedules",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.schedule",
+        "description": "Admin/finance only; production requires verified email. Strict single JSON object, no query, current revisionCAS, rate5 per direct peer and5 per user per minute for bill-schedule. Enabling requires BILL_DOWNLOADS_ENABLED=true and configured Alipay/WeChat BillProvider; disabling remains allowed with the gate off or provider absent. Saves authorization without outboundI/O. New/re-enabled plans and explicitly reauthorized new merchant identities start with yesterday in Shanghai; active same-merchant edits preserve cursor. Business dateD is dueD+1 at run_at. Recovery queues only the last7 completed Shanghai days. Stable identity inserts missing jobs, never restarts manual_required or takes over existing on-demand jobs; cursor, job and audit commit atomically. Role/security-version or merchant changes pause the plan. Disable/re-enable or authority change invalidates unfinished automatic jobs; completion rechecks live authorization. Same-authority time-only edits retain authorization. Saving is not download/import success; no funds or entitlement changes.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved schedule; does not imply a bill was downloaded or imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillDownloadSchedule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/unknown/missing fields, invalid provider/kind/time/revision or query;401 unauthenticated;403 role/email/security change;409 stale revision (refresh and retry) or unsupported provider capability;429 shared rate limit;503 global gate disabled for enabling, provider not configured or database unavailable. Sanitized errors never echo credentials, merchant URLs or file contents.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -6850,6 +6939,7 @@
               "provider_unavailable",
               "merchant_changed",
               "actor_changed",
+              "schedule_changed",
               "not_ready",
               "manual_required",
               "storage_error"
@@ -6887,6 +6977,14 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "schedule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^bill-(alipay|wechat)-(payment|refund)$",
+            "description": "Originating automatic schedule, or null for manual jobs. Explicit manual retry of a manual_required automatic job detaches obsolete schedule authorization while retaining the stable job ID."
           }
         },
         "required": [
@@ -6904,7 +7002,7 @@
           "next_attempt_at",
           "completed_at"
         ],
-        "description": "Sanitized durable job. Queued is not imported. Unique provider/kind/date/merchant fingerprint survives key rotation; manual-required repeat can resume the same ID under a fresh authorized actor/security version. succeeded has statement/completion references. No downloadURL, raw content, tokens, claim lease or merchant credentials exposed. No daily cron is implied."
+        "description": "Sanitized durable job. Queued is not imported. Unique provider/kind/date/merchant fingerprint survives key rotation; explicit manual-required repeat can resume the same ID under a fresh authorized actor/security version, detaching obsolete automatic authorization. Optional schedule_id identifies a daily-plan job. succeeded has statement/completion references. No downloadURL, raw content, tokens, lease, private schedule generation or merchant credentials exposed."
       },
       "BillDownloadList": {
         "type": "object",
@@ -6915,6 +7013,165 @@
             "maxItems": 100,
             "items": {
               "$ref": "#/components/schemas/BillDownloadJob"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "BillScheduleInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "run_at": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "24-hour HH:MM in Asia/Shanghai (UTC+08:00), independent of browser/server timezone."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "Current saved revision. Stale revisions reject409 rather than overwrite another edit."
+          }
+        },
+        "required": [
+          "provider",
+          "kind",
+          "enabled",
+          "run_at",
+          "revision"
+        ],
+        "description": "All fields required. Enabling snapshots the current authorized actor/security version and server merchant fingerprint. Browser-supplied owner, fingerprint, URL, credentials or cursor reject. No merchant request occurs in this handler."
+      },
+      "BillDownloadSchedule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^bill-(alipay|wechat)-(payment|refund)$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "run_at": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "timezone": {
+            "type": "string",
+            "const": "Asia/Shanghai"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "active",
+              "actor_changed",
+              "merchant_changed",
+              "provider_unavailable"
+            ]
+          },
+          "next_bill_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Next business date to queue, not the completion date. Due on the following Shanghai day at run_at. Null before first authorization."
+          },
+          "last_enqueued_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Last business date handled by scheduler, including an existing download job reused without requeue."
+          },
+          "last_job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "authorized_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "kind",
+          "enabled",
+          "run_at",
+          "timezone",
+          "revision",
+          "state",
+          "next_bill_date",
+          "last_enqueued_date",
+          "last_job_id",
+          "authorized_by",
+          "updated_at"
+        ],
+        "description": "One of four seeded schedules, initially disabled at10:00. Enabled implies active. Owner/security-version, server merchant fingerprint and private authorization generation bind each automatic job. Disable/re-enable or authority changes revoke unfinished old automatic jobs; time-only changes by the same actor/version/merchant preserve authorization and cursor. No private generation or credentials are exposed."
+      },
+      "BillScheduleList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/BillDownloadSchedule"
             }
           }
         },
@@ -6933,7 +7190,18 @@
     "finance": [
       "overview.read",
       "orders.read",
-      "plans.write"
+      "plans.write",
+      "payments.read",
+      "payments.retry",
+      "payments.close",
+      "refunds.read",
+      "refunds.request",
+      "statements.read",
+      "statements.import",
+      "statements.reconcile",
+      "statements.review",
+      "statements.download",
+      "statements.schedule"
     ],
     "operator": [
       "nodes.read",
@@ -6955,7 +7223,19 @@
       "events.retry",
       "entitlements.revoke",
       "users.read",
-      "users.roles"
+      "users.roles",
+      "payments.read",
+      "payments.retry",
+      "payments.close",
+      "refunds.read",
+      "refunds.request",
+      "refunds.approve",
+      "statements.read",
+      "statements.import",
+      "statements.reconcile",
+      "statements.review",
+      "statements.download",
+      "statements.schedule"
     ]
   }
 }

@@ -5,8 +5,8 @@ export interface Entitlement { revoked_at?: string | null; id: string; order_id:
 export interface Overview { users: number; orders: number; paid_minor: number; pending_events: number }
 export interface PaymentMethod { id: 'alipay' | 'wechat' | 'epay_alipay' | 'epay_wechat'; name: string }
 export interface Payment { id: string; order_id: string; provider: PaymentMethod['id']; status: 'pending' | 'ready' | 'paid'; checkout_kind: 'redirect' | 'qr' | ''; checkout_url: string; transaction_id?: string | null; created_at: string; updated_at: string; paid_at: string | null }
-export async function api<T>(path: string, body?: unknown): Promise<T> {
- const response = await fetch('/api/v1' + path, { credentials: 'same-origin', method: body === undefined ? 'GET' : 'POST', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+export async function api<T>(path: string, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+ const response = await fetch('/api/v1' + path, { credentials: 'same-origin', method: body === undefined ? 'GET' : method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
  const data = await response.json()
  if (!response.ok) throw new Error(data.error || '请求失败，请稍后再试')
  return data as T
@@ -22,7 +22,8 @@ export interface StatementRun { id: string; statement_id: string; revision: numb
 export interface StatementSummary extends MerchantStatement { latest_run: StatementRun }
 export interface StatementDetail { statement: MerchantStatement; latest_run: StatementRun; runs: StatementRun[]; sources?: StatementSource[] }
 export interface StatementSource { id: string; statement_id: string; format: string; kind: 'upload' | 'download'; digest: string; integrity: 'unverified_upload' | 'wechat_signed_sha1' | 'alipay_signed_url'; merchant_fingerprint: string; download_job_id: string | null; imported_by: string; created_at: string }
-export interface BillDownloadJob { id: string; provider: 'alipay' | 'wechat'; kind: 'payment' | 'refund'; date: string; status: 'queued' | 'processing' | 'waiting' | 'succeeded' | 'manual_required'; attempts: number; last_outcome: string; statement_id: string | null; requested_by: string; created_at: string; updated_at: string; next_attempt_at: string | null; completed_at: string | null }
+export interface BillDownloadJob { id: string; provider: 'alipay' | 'wechat'; kind: 'payment' | 'refund'; date: string; status: 'queued' | 'processing' | 'waiting' | 'succeeded' | 'manual_required'; attempts: number; last_outcome: string; statement_id: string | null; schedule_id?: string | null; requested_by: string; created_at: string; updated_at: string; next_attempt_at: string | null; completed_at: string | null }
+export interface BillSchedule { id: string; provider: 'alipay' | 'wechat'; kind: 'payment' | 'refund'; enabled: boolean; run_at: string; timezone: 'Asia/Shanghai'; revision: number; state: 'disabled' | 'active' | 'actor_changed' | 'merchant_changed' | 'provider_unavailable'; next_bill_date: string | null; last_enqueued_date: string | null; last_job_id: string | null; authorized_by: string | null; updated_at: string }
 export interface StatementReview { id: string; finding_id: string; actor_id: string; note: string; created_at: string }
 export interface StatementFinding { id: string; run_id: string; row_number: number | null; payment_id: string; refund_id: string; codes: string[]; statement_transaction_id: string; local_transaction_id: string; statement_provider_refund_id: string; local_provider_refund_id: string; statement_amount_minor: string | null; local_amount_minor: string | null; local_provider: string; local_status: string; local_confirmed_at: string | null; statement_occurred_at: string | null; review_count: number; latest_review: StatementReview | null }
 export interface StatementFindingsPage { items: StatementFinding[]; total: number; offset: number; limit: number }

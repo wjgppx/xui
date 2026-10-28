@@ -95,6 +95,26 @@ func TestBillDownloadQueueIsIdempotentAndBoundToMerchantIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBillDownloadRequestCannotRenewAuthorityFromAnInvalidatedSession(t *testing.T) {
+	s := testutil.Database(t)
+	ctx := context.Background()
+	actor := actionAdmin(t, s)
+	if _, err := s.DB.Exec(ctx, `UPDATE users SET security_version=security_version+1 WHERE id=$1`, actor); err != nil {
+		t.Fatal(err)
+	}
+	fp := strings.Repeat("a", 64)
+	if _, err := s.RequestBillDownload(ctx, actor, "wechat", "payment", billStoreDate(), fp, 0); !errors.Is(err, store.ErrRoleForbidden) {
+		t.Fatal("invalidated request created new authority", err)
+	}
+	jobs, err := s.ListBillDownloads(ctx)
+	if err != nil || len(jobs) != 0 {
+		t.Fatal("stale session left a job", err)
+	}
+	if _, err = s.RequestBillDownload(ctx, actor, "wechat", "payment", billStoreDate(), fp, 1); err != nil {
+		t.Fatal("current session could not request bill", err)
+	}
+}
 func TestNativeSourcesDeduplicateFactsAndRemainUnverifiedImmutableObservations(t *testing.T) {
 	s := testutil.Database(t)
 	ctx := context.Background()
@@ -288,7 +308,7 @@ func TestBillSourcesMigrationBackfillsExistingNormalizedEvidence(t *testing.T) {
 	s := testutil.Database(t)
 	ctx := context.Background()
 	actor := actionAdmin(t, s)
-	for _, query := range []string{`DROP TABLE merchant_statement_sources`, `DROP TABLE bill_download_jobs`, `DELETE FROM schema_migrations WHERE version=12`} {
+	for _, query := range []string{`ALTER TABLE bill_download_jobs DROP CONSTRAINT bill_download_jobs_schedule_id_fkey`, `DROP TABLE bill_download_schedules`, `DROP TABLE merchant_statement_sources`, `DROP TABLE bill_download_jobs`, `DELETE FROM schema_migrations WHERE version>=12`} {
 		if _, err := s.DB.Exec(ctx, query); err != nil {
 			t.Fatal(err)
 		}

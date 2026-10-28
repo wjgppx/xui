@@ -107,6 +107,7 @@ type BillDownloadJob struct {
 	LastOutcome   string     `json:"last_outcome"`
 	StatementID   *string    `json:"statement_id"`
 	RequestedBy   string     `json:"requested_by"`
+	ScheduleID    *string    `json:"schedule_id"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	NextAttemptAt *time.Time `json:"next_attempt_at"`
@@ -119,10 +120,10 @@ type BillDownloadClaim struct {
 	ActorVersion        int64  `json:"-"`
 }
 
-const billDownloadColumns = `id,provider,kind,business_date::text,status,attempts,last_outcome,statement_id,requested_by,created_at,updated_at,CASE WHEN status IN ('queued','waiting') THEN next_attempt_at ELSE NULL END,completed_at`
+const billDownloadColumns = `id,provider,kind,business_date::text,status,attempts,last_outcome,statement_id,requested_by,schedule_id,created_at,updated_at,CASE WHEN status IN ('queued','waiting') THEN next_attempt_at ELSE NULL END,completed_at`
 
 func billDownloadTargets(j *BillDownloadJob) []any {
-	return []any{&j.ID, &j.Provider, &j.Kind, &j.Date, &j.Status, &j.Attempts, &j.LastOutcome, &j.StatementID, &j.RequestedBy, &j.CreatedAt, &j.UpdatedAt, &j.NextAttemptAt, &j.CompletedAt}
+	return []any{&j.ID, &j.Provider, &j.Kind, &j.Date, &j.Status, &j.Attempts, &j.LastOutcome, &j.StatementID, &j.RequestedBy, &j.ScheduleID, &j.CreatedAt, &j.UpdatedAt, &j.NextAttemptAt, &j.CompletedAt}
 }
 func scanBillDownload(row pgx.Row) (BillDownloadJob, error) {
 	var j BillDownloadJob
@@ -142,8 +143,8 @@ func validBillDownloadDate(value string, now time.Time) bool {
 	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, zone)
 	return date.Before(today) && !date.Before(today.AddDate(0, 0, -90))
 }
-func (s *Store) RequestBillDownload(ctx context.Context, actor, provider, kind, date, fingerprint string) (BillDownloadJob, error) {
-	if (provider != "alipay" && provider != "wechat") || (kind != "payment" && kind != "refund") || !validBillDownloadDate(date, time.Now()) || !billDigestPattern.MatchString(fingerprint) {
+func (s *Store) RequestBillDownload(ctx context.Context, actor, provider, kind, date, fingerprint string, expectedVersion ...int64) (BillDownloadJob, error) {
+	if len(expectedVersion) > 1 || (provider != "alipay" && provider != "wechat") || (kind != "payment" && kind != "refund") || !validBillDownloadDate(date, time.Now()) || !billDigestPattern.MatchString(fingerprint) {
 		return BillDownloadJob{}, ErrStatementConflict
 	}
 	tx, err := s.DB.Begin(ctx)
@@ -151,7 +152,14 @@ func (s *Store) RequestBillDownload(ctx context.Context, actor, provider, kind, 
 		return BillDownloadJob{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = actionActor(ctx, tx, actor, -1, false); err != nil {
+	versionExpected := int64(-1)
+	if len(expectedVersion) == 1 {
+		versionExpected = expectedVersion[0]
+		if versionExpected < 0 {
+			return BillDownloadJob{}, ErrRoleForbidden
+		}
+	}
+	if err = actionActor(ctx, tx, actor, versionExpected, false); err != nil {
 		return BillDownloadJob{}, err
 	}
 	var version int64
@@ -173,7 +181,9 @@ func (s *Store) RequestBillDownload(ctx context.Context, actor, provider, kind, 
 	if tag.RowsAffected() == 1 {
 		action = "statement.download_requested"
 	} else if job.Status == "manual_required" {
-		job, err = scanBillDownload(tx.QueryRow(ctx, `UPDATE bill_download_jobs SET status='queued',attempts=0,last_outcome='retry_scheduled',requested_by=$2,actor_version=$3,next_attempt_at=clock_timestamp(),horizon_at=clock_timestamp()+interval '7 days',claim_token=NULL,lease_until=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING `+billDownloadColumns, job.ID, actor, version))
+		// A human retry grants new, explicit authority under the same stable job
+		// identity. It no longer depends on the revoked automatic schedule.
+		job, err = scanBillDownload(tx.QueryRow(ctx, `UPDATE bill_download_jobs SET status='queued',attempts=0,last_outcome='retry_scheduled',requested_by=$2,actor_version=$3,schedule_id=NULL,schedule_generation=NULL,next_attempt_at=clock_timestamp(),horizon_at=clock_timestamp()+interval '7 days',claim_token=NULL,lease_until=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING `+billDownloadColumns, job.ID, actor, version))
 		if err != nil {
 			return job, err
 		}
@@ -212,8 +222,10 @@ func (s *Store) ClaimBillDownload(ctx context.Context) (BillDownloadClaim, error
 	return j, statementError(err)
 }
 func (s *Store) BillDownloadAllowed(ctx context.Context, id, token string) (bool, error) {
-	var within, actorAllowed bool
-	err := s.DB.QueryRow(ctx, `SELECT j.horizon_at>clock_timestamp(),u.role IN ('admin','finance') AND u.security_version=j.actor_version FROM bill_download_jobs j JOIN users u ON u.id=j.requested_by WHERE j.id=$1 AND j.claim_token=$2 AND j.status='processing' AND j.lease_until>clock_timestamp()`, id, token).Scan(&within, &actorAllowed)
+	var within, actorAllowed, scheduleAllowed bool
+	err := s.DB.QueryRow(ctx, `SELECT j.horizon_at>clock_timestamp(),u.role IN ('admin','finance') AND u.security_version=j.actor_version,
+ j.schedule_id IS NULL OR EXISTS(SELECT 1 FROM bill_download_schedules d WHERE d.id=j.schedule_id AND d.enabled AND d.authorization_generation=j.schedule_generation AND d.authorized_by=j.requested_by AND d.actor_version=j.actor_version AND d.merchant_fingerprint=j.merchant_fingerprint)
+ FROM bill_download_jobs j JOIN users u ON u.id=j.requested_by WHERE j.id=$1 AND j.claim_token=$2 AND j.status='processing' AND j.lease_until>clock_timestamp()`, id, token).Scan(&within, &actorAllowed, &scheduleAllowed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrStatementConflict
 	}
@@ -223,11 +235,14 @@ func (s *Store) BillDownloadAllowed(ctx context.Context, id, token string) (bool
 	if !actorAllowed {
 		return false, ErrRoleForbidden
 	}
+	if !scheduleAllowed {
+		return false, ErrBillScheduleChanged
+	}
 	return within, nil
 }
 func billDownloadOutcome(outcome string) bool {
 	switch outcome {
-	case "gateway_error", "verification_error", "parse_error", "unsupported", "provider_unavailable", "merchant_changed", "actor_changed", "not_ready", "manual_required", "storage_error":
+	case "gateway_error", "verification_error", "parse_error", "unsupported", "provider_unavailable", "merchant_changed", "actor_changed", "schedule_changed", "not_ready", "manual_required", "storage_error":
 		return true
 	}
 	return false
@@ -253,7 +268,7 @@ func (s *Store) FinishBillDownload(ctx context.Context, id, token, outcome strin
 	}
 	attempts++
 	status := "waiting"
-	if !within || attempts >= 8 || outcome == "parse_error" || outcome == "unsupported" || outcome == "merchant_changed" || outcome == "actor_changed" || outcome == "manual_required" {
+	if !within || attempts >= 8 || outcome == "parse_error" || outcome == "unsupported" || outcome == "merchant_changed" || outcome == "actor_changed" || outcome == "schedule_changed" || outcome == "manual_required" {
 		status = "manual_required"
 	}
 	delay := 30
@@ -285,7 +300,9 @@ func (s *Store) CompleteBillDownload(ctx context.Context, id, token string, resu
 	// the same order used when an authorized user renews a manual-required job.
 	var actor string
 	var version int64
-	err = s.DB.QueryRow(ctx, `SELECT requested_by,actor_version FROM bill_download_jobs WHERE id=$1`, id).Scan(&actor, &version)
+	var scheduleID *string
+	var scheduleGeneration *int64
+	err = s.DB.QueryRow(ctx, `SELECT requested_by,actor_version,schedule_id,schedule_generation FROM bill_download_jobs WHERE id=$1`, id).Scan(&actor, &version, &scheduleID, &scheduleGeneration)
 	if err != nil {
 		return StatementDetail{}, statementError(err)
 	}
@@ -296,6 +313,19 @@ func (s *Store) CompleteBillDownload(ctx context.Context, id, token string, resu
 	defer tx.Rollback(ctx)
 	if err = actionActor(ctx, tx, actor, version, false); err != nil {
 		return StatementDetail{}, statementError(err)
+	}
+	// Hold automatic authorization until commit. A disable/ownership change
+	// serializes against this lock, even when it happens during a file download.
+	// Actor -> schedule -> job is the same order used by the dispatcher.
+	if scheduleID != nil {
+		var ignored string
+		err = tx.QueryRow(ctx, `SELECT id FROM bill_download_schedules WHERE id=$1 AND enabled AND authorization_generation=$2 AND authorized_by=$3 AND actor_version=$4 AND merchant_fingerprint=(SELECT merchant_fingerprint FROM bill_download_jobs WHERE id=$5) FOR SHARE`, *scheduleID, scheduleGeneration, actor, version, id).Scan(&ignored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return StatementDetail{}, ErrBillScheduleChanged
+		}
+		if err != nil {
+			return StatementDetail{}, statementError(err)
+		}
 	}
 	var provider, kind, date, fingerprint, currentActor string
 	var currentVersion int64

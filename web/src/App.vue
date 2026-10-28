@@ -127,7 +127,7 @@ onMounted(load)
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.12</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.13</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
@@ -140,7 +140,7 @@ onMounted(load)
       <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
       <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" :can-request-refund="can('refunds.request')" :can-close="can('payments.close')" :actions-enabled="paymentActionsEnabled" />
       <RefundOperations v-if="view === 'refunds' && can('refunds.read')" :can-approve="can('refunds.approve')" :actions-enabled="paymentActionsEnabled" />
-      <MerchantStatements v-if="view === 'statements' && can('statements.read')" :can-import="can('statements.import')" :can-reconcile="can('statements.reconcile')" :can-review="can('statements.review')" :can-download="can('statements.download')" :bill-downloads-enabled="billDownloadsEnabled" />
+      <MerchantStatements v-if="view === 'statements' && can('statements.read')" :can-import="can('statements.import')" :can-reconcile="can('statements.reconcile')" :can-review="can('statements.review')" :can-download="can('statements.download')" :can-schedule="can('statements.schedule')" :bill-downloads-enabled="billDownloadsEnabled" />
       <StaffManager v-if="view === 'staff' && can('users.read')" :can-manage-roles="can('users.roles')" />
       <NodeManager v-if="view === 'nodes' && can('nodes.read')" />
       <AccessManager v-if="view === 'access' && can('access.read')" />

@@ -95,7 +95,7 @@ func (s *Server) requestBillDownload(w http.ResponseWriter, r *http.Request) {
 	// Only server-side merchant identity enters the job. URLs, tokens and
 	// credentials are never accepted from this browser-facing endpoint, and
 	// the HTTP request does not call the merchant or download any file.
-	job, err := s.Store.RequestBillDownload(r.Context(), u.ID, body.Provider, body.Kind, body.Date, billProvider.BillMerchantFingerprint())
+	job, err := s.Store.RequestBillDownload(r.Context(), u.ID, body.Provider, body.Kind, body.Date, billProvider.BillMerchantFingerprint(), u.SecurityVersion)
 	if err != nil {
 		s.statementError(w, err)
 		return

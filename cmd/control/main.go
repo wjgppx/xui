@@ -142,6 +142,9 @@ func main() {
 		defer func() { stop(); <-actionDone }()
 	}
 	if billDownloadsEnabled {
+		scheduleDone := make(chan struct{})
+		go func() { defer close(scheduleDone); billfetch.RunSchedules(ctx, s, registry) }()
+		defer func() { stop(); <-scheduleDone }()
 		billDone := make(chan struct{})
 		go func() { defer close(billDone); billfetch.Run(ctx, s, registry) }()
 		defer func() { stop(); <-billDone }()
