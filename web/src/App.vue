@@ -10,8 +10,9 @@ import StaffManager from './StaffManager.vue'
 import PaymentCheckout from './PaymentCheckout.vue'
 const PaymentOperations = defineAsyncComponent(() => import('./PaymentOperations.vue'))
 const RefundOperations = defineAsyncComponent(() => import('./RefundOperations.vue'))
+const MerchantStatements = defineAsyncComponent(() => import('./MerchantStatements.vue'))
 
-type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments' | 'refunds'
+type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments' | 'refunds' | 'statements'
 const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<Plan[]>([]), orders = ref<Order[]>([]), entitlements = ref<Entitlement[]>([])
 const paymentMethods = ref<PaymentMethod[]>([]), paymentMethodsError = ref(''), paymentOrder = ref<Order | null>(null)
 const developmentMail = ref(false), verificationRequired = ref(false), paymentActionsEnabled = ref(false)
@@ -37,7 +38,7 @@ function closeOrder(order: Order) {
  if (!window.confirm('仅可关闭尚未发起外部付款的订单。关闭后无法继续使用此订单付款，是否继续？')) return
  return action(async () => { await api(`/orders/${encodeURIComponent(order.id)}/close`, {}); await personal(); notice.value = '订单已关闭。' })
 }
-const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号', payments: '支付流水', refunds: '退款管理' }
+const labels: Record<View, string> = { overview: '我的概览', plans: '探索套餐', orders: '我的订单', subscription: '我的订阅', admin: '运营工作台', nodes: '节点管理', access: '权限管理', security: '账号安全', staff: '后台账号', payments: '支付流水', refunds: '退款管理', statements: '商户账单' }
 const theme = { common: { primaryColor: '#21766b', primaryColorHover: '#185e55', primaryColorPressed: '#124d46', borderRadius: '10px', fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif' } }
 
 async function personal() {
@@ -122,10 +123,11 @@ onMounted(load)
      <button v-if="can('access.read')" :class="{ selected: view === 'access' }" @click="view = 'access'"><span class="nav-icon">▧</span>权限管理</button>
      <button v-if="can('payments.read')" :class="{ selected: view === 'payments' }" @click="view = 'payments'"><span class="nav-icon">¥</span>支付流水</button>
      <button v-if="can('refunds.read')" :class="{ selected: view === 'refunds' }" @click="view = 'refunds'"><span class="nav-icon">↶</span>退款管理</button>
+     <button v-if="can('statements.read')" :class="{ selected: view === 'statements' }" @click="view = 'statements'"><span class="nav-icon">▤</span>商户账单</button>
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.10</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.11</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
@@ -138,6 +140,7 @@ onMounted(load)
       <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
       <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" :can-request-refund="can('refunds.request')" :can-close="can('payments.close')" :actions-enabled="paymentActionsEnabled" />
       <RefundOperations v-if="view === 'refunds' && can('refunds.read')" :can-approve="can('refunds.approve')" :actions-enabled="paymentActionsEnabled" />
+      <MerchantStatements v-if="view === 'statements' && can('statements.read')" :can-import="can('statements.import')" :can-reconcile="can('statements.reconcile')" :can-review="can('statements.review')" />
       <StaffManager v-if="view === 'staff' && can('users.read')" :can-manage-roles="can('users.roles')" />
       <NodeManager v-if="view === 'nodes' && can('nodes.read')" />
       <AccessManager v-if="view === 'access' && can('access.read')" />

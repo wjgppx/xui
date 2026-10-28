@@ -6,9 +6,9 @@ import (
 )
 
 var rolePermissions = map[string][]string{
-	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve"},
+	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve", "statements.read", "statements.import", "statements.reconcile", "statements.review"},
 	"support":  {"orders.read", "users.read"},
-	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request"},
+	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "statements.read", "statements.import", "statements.reconcile", "statements.review"},
 	"operator": {"nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry"},
 	"user":     {},
 }
@@ -25,6 +25,27 @@ func permitted(role, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/admin/statements":
+		if r.Method == "GET" {
+			return "statements.read"
+		}
+		return "statements.import"
+	case strings.HasPrefix(p, "/api/v1/admin/statements/"):
+		if r.Method == "POST" && strings.HasSuffix(p, "/reconcile") {
+			return "statements.reconcile"
+		}
+		if r.Method == "GET" {
+			return "statements.read"
+		}
+		return "unmapped.deny"
+	case strings.HasPrefix(p, "/api/v1/admin/statement-findings/") && strings.HasSuffix(p, "/reviews"):
+		if r.Method == "POST" {
+			return "statements.review"
+		}
+		if r.Method == "GET" {
+			return "statements.read"
+		}
+		return "unmapped.deny"
 	case p == "/api/v1/admin/refunds":
 		return "refunds.read"
 	case strings.HasPrefix(p, "/api/v1/admin/refunds/") && strings.HasSuffix(p, "/approve"):

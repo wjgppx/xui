@@ -16,3 +16,11 @@ export interface PaymentOperation { id: string; order_id: string; user_email: st
 export interface PaymentActivity { id: string | number; payment_id?: string | null; order_id?: string | null; provider?: string; source: string; outcome: string; created_at: string }
 
 export interface RefundOperation { id: string; payment_id: string; order_id: string; provider: PaymentMethod['id']; transaction_id: string; amount_minor: number; currency: string; reason: string; status: 'requested' | 'queued' | 'processing' | 'succeeded' | 'failed' | 'manual_required'; requested_by: string; approved_by: string | null; created_at: string; updated_at: string; completed_at: string | null; provider_refund_id: string | null; user_email: string }
+
+export interface MerchantStatement { id: string; provider: PaymentMethod['id']; kind: 'payment' | 'refund'; date: string; coverage: 'partial' | 'full'; digest: string; imported_by: string; row_count: number; total_minor: string; created_at: string }
+export interface StatementRun { id: string; statement_id: string; revision: number; matched_count: number; difference_count: number; local_candidate_count: number; as_of: string; created_by: string }
+export interface StatementSummary extends MerchantStatement { latest_run: StatementRun }
+export interface StatementDetail { statement: MerchantStatement; latest_run: StatementRun; runs: StatementRun[] }
+export interface StatementReview { id: string; finding_id: string; actor_id: string; note: string; created_at: string }
+export interface StatementFinding { id: string; run_id: string; row_number: number | null; payment_id: string; refund_id: string; codes: string[]; statement_transaction_id: string; local_transaction_id: string; statement_provider_refund_id: string; local_provider_refund_id: string; statement_amount_minor: string | null; local_amount_minor: string | null; local_provider: string; local_status: string; local_confirmed_at: string | null; statement_occurred_at: string | null; review_count: number; latest_review: StatementReview | null }
+export interface StatementFindingsPage { items: StatementFinding[]; total: number; offset: number; limit: number }

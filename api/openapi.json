@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.10.0",
-    "description": "Independent subscription platform. Adds opt-in, durable signed Alipay/WeChat gateway closure and original-payment full refunds with approval, fresh password authentication, stable request identity, bounded recovery and atomic entitlement revocation. Real merchant acceptance and full statement reconciliation remain pending."
+    "version": "0.11.0",
+    "description": "Independent subscription platform with verified payment adapters, approved full refunds and durable gateway closure. Adds normalized manual CSV statement import, consistent-snapshot payment/refund discrepancy reports, immutable report revisions and append-only review notes. Imported files and review labels never mutate financial facts or entitlements. Official statement download, native provider CSV adapters and real merchant acceptance remain pending."
   },
   "paths": {
     "/healthz": {
@@ -3342,6 +3342,413 @@
           }
         ]
       }
+    },
+    "/api/v1/admin/statements": {
+      "get": {
+        "summary": "Staff: latest100 merchant statement batches",
+        "operationId": "get_api_v1_admin_statements",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Rejects all query parameters. Includes each batch latest immutable report summary.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Staff: import normalized CSV statement and initial report",
+        "operationId": "post_api_v1_admin_statements",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.import",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Strict single JSON object, max2MiB request and1MiB CSV, max2000 rows. Partial compares forward only; full scans up to2000 local confirmation-day successes and refuses overflow atomically. Canonical identical content reuses the existing batch/latest report without a new report or audit. Import, initial report and audit commit atomically. Rate:5 per direct peer and5 per user per minute per purpose. Concurrent identical imports may return409 with an atomic rollback; refresh and retry to read the committed existing batch.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantStatementImport"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/statements/{id}": {
+      "get": {
+        "summary": "Staff: statement metadata and latest20 report revisions",
+        "operationId": "get_api_v1_admin_statements_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Rejects all query parameters. Retains immutable source metadata and historical report evidence.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/statements/{id}/reconcile": {
+      "post": {
+        "summary": "Staff: reconcile statement against a new consistent snapshot",
+        "operationId": "post_api_v1_admin_statements_id_reconcile",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.reconcile",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Strict empty JSON object. Creates a new immutable report revision and fresh finding IDs; old report/reviews remain. Does not carry old reviews into changed findings. Limits/serialization conflict409; no partial report. Rate:5 per direct peer and5 per user per minute per purpose. Concurrent reruns can return409 and should be retried after reading the latest report.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementRun"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/statements/{id}/runs/{runID}/findings": {
+      "get": {
+        "summary": "Staff: paginated findings from an immutable report",
+        "operationId": "get_api_v1_admin_statements_id_runs_runID_findings",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Checks run belongs to statement; mismatched nesting404. Unknown, duplicate, malformed or out-of-range query parameters400. Maximum4000 findings per run; each page at most100. Amount fields use exact decimal strings. Forward matching includes original paid evidence after full refunds; reverse local_only candidates require provider-date/timing review.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementFindingsPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          },
+          {
+            "name": "runID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          },
+          {
+            "name": "review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "unreviewed",
+                "reviewed"
+              ],
+              "default": "all"
+            },
+            "description": "Review status only, never financial resolution."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4000,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/statement-findings/{id}/reviews": {
+      "get": {
+        "summary": "Staff: latest100 append-only finding review notes",
+        "operationId": "get_api_v1_admin_statement-findings_id_reviews",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Rejects all query parameters; unknown finding404. Notes do not resolve financial facts.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementReviews"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          }
+        ]
+      },
+      "post": {
+        "summary": "Staff: append an audited review note",
+        "operationId": "post_api_v1_admin_statement-findings_id_reviews",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.review",
+        "description": "Admin/finance only; verified email required in production. Imports and notes are observations, never authenticated money facts. Financial/payment/refund/action/entitlement state is unchanged. PAYMENT_ACTIONS_ENABLED is independent. Strict note-only JSON, trimmed UTF8 note1..1000 bytes without Unicode controls. Same actor/finding/note repeat is idempotent; previous notes stay immutable. Actor role and audit are checked in the write transaction. Rate:10 per direct peer and10 per user per minute per purpose.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantStatementReview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 invalid input/query;401 unauthenticated;403 role/email policy;404 missing or wrong nested ownership;409 limit/concurrency conflict (retry after reread);429 rate limit;503 database unavailable. No imported row values or merchant secrets are echoed in errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantStatementReviewCreate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID; invalid path IDs return404."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -5434,6 +5841,570 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "MerchantStatementImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "epay_alipay",
+              "epay_wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+            "description": "Exact valid calendar date in years2000..2099, using the Shanghai UTC+08 day [00:00,next00:00)."
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "partial compares imported rows only. full is the operator assertion of a complete Shanghai day and permits local-confirmation timing candidates, not proof of missing provider funds."
+          },
+          "csv": {
+            "type": "string",
+            "maxLength": 1048576,
+            "description": "Normalized UTF-8 CSV v1, byte limit1MiB and2000 data rows. Exact ordered header: payment_id,transaction_id,refund_id,provider_refund_id,amount_minor,currency,occurred_at. Optional BOM andCRLF allowed; blank lines, invalidUTF8, controls, duplicates, malformed CSV, unknown columns, fractional/overflow/zero amounts, nonCNY, or timestamps outside selected Shanghai day reject the entire batch. amount_minor input is positive canonical integer cents; occurred_at isRFC3339 with an explicit offset. Payment rows require both original IDs and empty refund fields; refund rows require all4IDs. All identifiers follow ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$. Original provider CSV is not accepted directly. Fractional seconds allow at most9digits. Validate the original instant against day boundaries, then normalize UTC and truncate to microseconds before hashing/persistence to match PostgreSQL precision."
+          }
+        },
+        "required": [
+          "provider",
+          "kind",
+          "date",
+          "coverage",
+          "csv"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "refund"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "provider": {
+                  "enum": [
+                    "alipay",
+                    "wechat"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "description": "A single provider, kind, Shanghai date and declared coverage. Strict JSON with a2MiB body ceiling. Refund imports currently support direct Alipay/WeChat only. Same semantic digest returns the existing batch/current report; changed normalized content creates a new immutable batch. Does not call providers, settle, refund, enqueue actions or change rights. Concurrent identical imports may safely return retryable409; dedup guarantees no duplicate records, not that every concurrent caller receives200."
+      },
+      "MerchantStatement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "epay_alipay",
+              "epay_wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+            "description": "Exact valid calendar date in years2000..2099, using the Shanghai UTC+08 day [00:00,next00:00)."
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "partial compares imported rows only. full is the operator assertion of a complete Shanghai day and permits local-confirmation timing candidates, not proof of missing provider funds."
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA256 of versioned canonical metadata and normalized sorted rows; order/BOM/line endings/equivalent time offsets do not create new batches."
+          },
+          "imported_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "total_minor": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "maxLength": 19,
+            "description": "Exact nonnegative decimal integer cents encoded as a JSON string; total <=9223372036854775807. Zero is valid for a header-only statement."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "kind",
+          "date",
+          "coverage",
+          "digest",
+          "imported_by",
+          "row_count",
+          "total_minor",
+          "created_at"
+        ]
+      },
+      "MerchantStatementRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "statement_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "matched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "local_candidate_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "id",
+          "statement_id",
+          "revision",
+          "matched_count",
+          "difference_count",
+          "local_candidate_count",
+          "as_of",
+          "created_by"
+        ],
+        "description": "Immutable report over one consistent PostgreSQL snapshot; does not lock financial rows. New reconciliation creates a revision with new findingIDs; previous notes do not automatically carry forward. local_candidate_count includes only full-coverage local-confirmation-day records absent from imported IDs. Local paid_at/completed_at are confirmation timestamps, not provider occurrence dates."
+      },
+      "MerchantStatementSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "epay_alipay",
+              "epay_wechat"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+            "description": "Exact valid calendar date in years2000..2099, using the Shanghai UTC+08 day [00:00,next00:00)."
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "partial compares imported rows only. full is the operator assertion of a complete Shanghai day and permits local-confirmation timing candidates, not proof of missing provider funds."
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA256 of versioned canonical metadata and normalized sorted rows; order/BOM/line endings/equivalent time offsets do not create new batches."
+          },
+          "imported_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "total_minor": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "maxLength": 19,
+            "description": "Exact nonnegative decimal integer cents encoded as a JSON string; total <=9223372036854775807. Zero is valid for a header-only statement."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latest_run": {
+            "$ref": "#/components/schemas/MerchantStatementRun"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "kind",
+          "date",
+          "coverage",
+          "digest",
+          "imported_by",
+          "row_count",
+          "total_minor",
+          "created_at",
+          "latest_run"
+        ]
+      },
+      "MerchantStatementList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantStatementSummary"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MerchantStatementDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "$ref": "#/components/schemas/MerchantStatement"
+          },
+          "latest_run": {
+            "$ref": "#/components/schemas/MerchantStatementRun"
+          },
+          "runs": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/MerchantStatementRun"
+            }
+          }
+        },
+        "required": [
+          "statement",
+          "latest_run",
+          "runs"
+        ]
+      },
+      "MerchantStatementReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "finding_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "actor_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Trimmed valid UTF8,1..1000 bytes, no Unicode control characters. An append-only review note; reviewed does not mean financial discrepancy corrected."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "finding_id",
+          "actor_id",
+          "note",
+          "created_at"
+        ]
+      },
+      "MerchantStatementReviewCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Trimmed valid UTF8,1..1000 bytes, no Unicode control characters. An append-only review note; reviewed does not mean financial discrepancy corrected."
+          }
+        },
+        "required": [
+          "note"
+        ]
+      },
+      "MerchantStatementReviews": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantStatementReview"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MerchantStatementFinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "row_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 2000,
+            "description": "Canonical sorted row position; null for reverse local-only candidates. Not the physical sourceCSV line number."
+          },
+          "payment_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Merchant/provider reference. Imported references may identify transactions absent from this platform; they never create a payment or refund."
+          },
+          "refund_id": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Merchant/provider reference. Imported references may identify transactions absent from this platform; they never create a payment or refund."
+          },
+          "codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "missing_local",
+                "provider_mismatch",
+                "identity_mismatch",
+                "amount_mismatch",
+                "not_confirmed",
+                "local_only"
+              ]
+            },
+            "description": "One finding may contain several differences. local_only is a timing candidate requiring adjacent-day/provider-date review, never a definitive assertion that funds are missing."
+          },
+          "statement_transaction_id": {
+            "type": "string"
+          },
+          "local_transaction_id": {
+            "type": "string"
+          },
+          "statement_provider_refund_id": {
+            "type": "string"
+          },
+          "local_provider_refund_id": {
+            "type": "string"
+          },
+          "statement_amount_minor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$",
+                "maxLength": 19,
+                "description": "Exact positive decimal integer cents encoded as a JSON string; value <=9223372036854775807. Never parse through an IEEE754 number."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "local_amount_minor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$",
+                "maxLength": 19,
+                "description": "Exact positive decimal integer cents encoded as a JSON string; value <=9223372036854775807. Never parse through an IEEE754 number."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "local_provider": {
+            "type": "string"
+          },
+          "local_status": {
+            "type": "string"
+          },
+          "local_confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "statement_occurred_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Provider occurrence time from the normalized input, converted toUTC and truncated to microseconds after day-boundary validation. This is an imported observation, not verified payment evidence."
+          },
+          "review_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latest_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MerchantStatementReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "row_number",
+          "payment_id",
+          "refund_id",
+          "codes",
+          "statement_transaction_id",
+          "local_transaction_id",
+          "statement_provider_refund_id",
+          "local_provider_refund_id",
+          "statement_amount_minor",
+          "local_amount_minor",
+          "local_provider",
+          "local_status",
+          "local_confirmed_at",
+          "statement_occurred_at",
+          "review_count",
+          "latest_review"
+        ]
+      },
+      "MerchantStatementFindingsPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MerchantStatementFinding"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
         ]
       }
     }

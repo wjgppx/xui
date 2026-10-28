@@ -43,6 +43,9 @@ var paymentLifecycleSchema string
 //go:embed payment_actions.sql
 var paymentActionsSchema string
 
+//go:embed merchant_statements.sql
+var merchantStatementsSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -114,7 +117,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema, merchantStatementsSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err
