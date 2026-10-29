@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wjgppx/xui/internal/billfetch"
+	"github.com/wjgppx/xui/internal/clientip"
+	"github.com/wjgppx/xui/internal/controlconfig"
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/mailer"
 	"github.com/wjgppx/xui/internal/paymentactions"
@@ -22,14 +24,17 @@ import (
 	"github.com/wjgppx/xui/internal/store"
 )
 
+var releaseID = "development"
+
 func main() {
 	admin := flag.String("promote-admin", "", "Promote an existing registered email, then exit")
 	demote := flag.String("demote-admin", "", "Return an existing administrator to the user role, then exit")
 	setRole := flag.String("set-role", "", "Change the role of an existing registered email, then exit")
 	roleName := flag.String("role", "", "Role for --set-role: user, admin, support, finance, operator")
+	resetMFA := flag.String("reset-staff-mfa", "", "Host-console recovery: remove an existing staff account's MFA and revoke all sessions, then exit")
 	flag.Parse()
 	operations := 0
-	for _, v := range []string{*admin, *demote, *setRole} {
+	for _, v := range []string{*admin, *demote, *setRole, *resetMFA} {
 		if v != "" {
 			operations++
 		}
@@ -58,6 +63,9 @@ func main() {
 	}
 	if operations == 1 {
 		email, role := *admin, "admin"
+		if *resetMFA != "" {
+			email = *resetMFA
+		}
 		if *demote != "" {
 			email, role = *demote, "user"
 		}
@@ -69,6 +77,14 @@ func main() {
 			slog.Error("existing account required")
 			os.Exit(1)
 		}
+		if *resetMFA != "" {
+			if err = s.ResetStaffMFA(ctx, userID, userID); err != nil {
+				slog.Error("staff second-factor recovery failed")
+				os.Exit(1)
+			}
+			slog.Info("host-console staff second-factor recovery completed; all sessions revoked")
+			return
+		}
 		if err = s.SetUserRole(ctx, userID, userID, role, true); err != nil {
 			slog.Error("role update failed")
 			os.Exit(1)
@@ -79,6 +95,16 @@ func main() {
 	mode := os.Getenv("APP_MODE")
 	if mode != "development" && mode != "production" {
 		slog.Error("APP_MODE must be development or production")
+		os.Exit(1)
+	}
+	trustedProxy, err := clientip.Parse(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		slog.Error("trusted proxy configuration invalid")
+		os.Exit(1)
+	}
+	requireStaffMFA, mfaKey, err := controlconfig.StaffMFA(mode == "production", os.Getenv("REQUIRE_STAFF_MFA"), os.Getenv("MFA_KEY_FILE"))
+	if err != nil {
+		slog.Error("staff second-factor configuration invalid", "error", err)
 		os.Exit(1)
 	}
 	origin := os.Getenv("PUBLIC_ORIGIN")
@@ -149,16 +175,16 @@ func main() {
 		go func() { defer close(billDone); billfetch.Run(ctx, s, registry) }()
 		defer func() { stop(); <-billDone }()
 	}
-	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled, BillDownloadsEnabled: billDownloadsEnabled})
+	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled, BillDownloadsEnabled: billDownloadsEnabled, TrustedProxy: trustedProxy, MFAKey: mfaKey, RequireStaffMFA: requireStaffMFA, ReleaseID: releaseID})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdown)
-	}()
+	shutdownDone := shutdownOnCancel(ctx, server, 10*time.Second)
 	slog.Info("control API started", "address", addr, "mode", mode)
-	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	err = server.ListenAndServe()
+	stop()
+	// Shutdown closes the listener before draining handlers. Keep the database
+	// and process alive until the drain finishes (or its deadline forces Close).
+	<-shutdownDone
+	if err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}

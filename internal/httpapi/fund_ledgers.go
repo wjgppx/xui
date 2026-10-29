@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"time"
 
@@ -123,10 +122,7 @@ func (s *Server) fundLedgerWriteUser(w http.ResponseWriter, r *http.Request, pur
 	if !ok {
 		return u, false
 	}
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := clientAddress(r)
 	for _, key := range []string{"fund-peer:" + purpose + ":" + ip, "fund-user:" + purpose + ":" + u.ID} {
 		allowed, err := s.Store.AllowRate(r.Context(), key, 5, time.Minute)
 		if err != nil {

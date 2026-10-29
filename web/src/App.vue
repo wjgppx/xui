@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NConfigProvider, NInput, NInputNumber, NModal, NTag } from 'naive-ui'
 import { api, type User, type Plan, type Order, type Entitlement, type Overview, type PaymentMethod } from './api'
 import NodeManager from './NodeManager.vue'
@@ -18,9 +18,22 @@ const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<P
 const paymentMethods = ref<PaymentMethod[]>([]), paymentMethodsError = ref(''), paymentOrder = ref<Order | null>(null)
 const developmentMail = ref(false), verificationRequired = ref(false), paymentActionsEnabled = ref(false), billDownloadsEnabled = ref(false)
 const linkAction = ref<'verify' | 'reset' | null>(null), linkToken = ref('')
-const can = (permission: string) => !!user.value && (!verificationRequired.value || !!user.value.email_verified_at) && user.value.permissions?.includes(permission)
+const now = ref(Date.now()), mfaForced = ref('')
+const mfaLocked = computed(() => {
+ if (!user.value || user.value.role === 'user') return false
+ const until = user.value.mfa_verified_until ? new Date(user.value.mfa_verified_until).getTime() : NaN
+ return !!mfaForced.value || (user.value.mfa_required === true && (!Number.isFinite(until) || until <= now.value))
+})
+const mfaEnrollmentRequired = computed(() => mfaForced.value === 'mfa_enrollment_required' || user.value?.mfa_enabled === false)
+const can = (permission: string) => !!user.value && !mfaLocked.value && (!verificationRequired.value || !!user.value.email_verified_at) && user.value.permissions?.includes(permission)
 const staff = computed(() => !!user.value && user.value.role !== 'user')
 const allOrders = ref<Order[]>([]), overview = ref<Overview | null>(null), development = ref(false), loading = ref(true), busy = ref(false)
+const adminViews: View[] = ['admin', 'nodes', 'access', 'staff', 'payments', 'refunds', 'statements', 'funds']
+watch(mfaLocked, locked => {
+ if (!locked) return
+ overview.value = null; allOrders.value = []; planOpen.value = false
+ if (adminViews.includes(view.value)) view.value = 'security'
+})
 const error = ref(''), notice = ref(''), authOpen = ref(false), registering = ref(false), email = ref(''), password = ref('')
 const planOpen = ref(false), planName = ref(''), planDescription = ref(''), planPrice = ref(19), planDays = ref(30), planQuota = ref(100)
 const active = computed(() => entitlements.value.find(e => !e.revoked_at && new Date(e.starts_at).getTime() <= Date.now() && new Date(e.ends_at).getTime() > Date.now()))
@@ -30,7 +43,6 @@ const usage = (v: number) => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; 
 const money = (v: number) => (v / 100).toFixed(2)
 const gib = (v: number) => (v / 1024 ** 3).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 const date = (v: string) => new Date(v).toLocaleDateString('zh-CN')
-const now = ref(Date.now())
 const orderClock = window.setInterval(() => { now.value = Date.now() }, 1000)
 onBeforeUnmount(() => window.clearInterval(orderClock))
 const orderStatus = (order: Order): Order['status'] => order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() <= now.value ? 'expired' : order.status
@@ -46,7 +58,8 @@ async function personal() {
  if (!user.value) return
  ;[orders.value, entitlements.value] = await Promise.all([api<Order[]>('/orders'), api<Entitlement[]>('/me/entitlements')])
  overview.value = null; allOrders.value = []
- await Promise.all([can('overview.read') ? api<Overview>('/admin/overview').then(v => { overview.value = v }) : Promise.resolve(), can('orders.read') ? api<Order[]>('/admin/orders').then(v => { allOrders.value = v }) : Promise.resolve()])
+ const userID = user.value?.id
+ await Promise.all([can('overview.read') ? api<Overview>('/admin/overview').then(v => { if (user.value?.id === userID && can('overview.read')) overview.value = v }) : Promise.resolve(), can('orders.read') ? api<Order[]>('/admin/orders').then(v => { if (user.value?.id === userID && can('orders.read')) allOrders.value = v }) : Promise.resolve()])
 }
 async function action(task: () => Promise<void>) {
  if (busy.value) return
@@ -68,10 +81,27 @@ async function loadPaymentMethods() {
 }
 function openAuth(register = false) { registering.value = register; authOpen.value = true; error.value = '' }
 function authenticate() { return action(async () => { user.value = await api<User>(registering.value ? '/auth/register' : '/auth/login', { email: email.value, password: password.value }); password.value = ''; authOpen.value = false; await personal(); notice.value = '欢迎回来，你的空间已准备就绪。' }) }
-function clearSession() { paymentOrder.value = null; user.value = null; orders.value = []; entitlements.value = []; overview.value = null; allOrders.value = []; linkAction.value = null; linkToken.value = ''; view.value = 'overview' }
+function clearSession() { paymentOrder.value = null; user.value = null; orders.value = []; entitlements.value = []; overview.value = null; allOrders.value = []; linkAction.value = null; linkToken.value = ''; mfaForced.value = ''; view.value = 'overview' }
 function logout() { return action(async () => { await api('/auth/logout', {}); clearSession() }) }
 function signedOut() { clearSession(); notice.value = '密码已更新，请重新登录。' }
-async function refreshProfile() { if (!user.value) return; user.value = await api<User>('/me'); await personal() }
+function mfaSignedOut() { clearSession(); notice.value = '后台二次验证已停用，所有设备已退出，请重新登录。' }
+async function refreshProfile() {
+ const userID = user.value?.id
+ if (!userID) return
+ try {
+  const next = await api<User>('/me')
+  if (user.value?.id !== userID) return
+  user.value = next; mfaForced.value = ''; error.value = ''; await personal()
+ } catch (e) { error.value = e instanceof Error ? e.message : '账号服务暂时不可用，请稍后刷新。' }
+}
+function requireMFA(event: Event) {
+ if (!user.value || user.value.role === 'user') return
+ const code = (event as CustomEvent<string>).detail
+ if (code !== 'mfa_required' && code !== 'mfa_enrollment_required') return
+ mfaForced.value = code; view.value = 'security'; overview.value = null; allOrders.value = []; planOpen.value = false; error.value = ''
+}
+window.addEventListener('xui:mfa-required', requireMFA)
+onBeforeUnmount(() => window.removeEventListener('xui:mfa-required', requireMFA))
 function consumeLink() { linkAction.value = null; linkToken.value = '' }
 function useMailAction(action: 'verify' | 'reset', token: string) { notice.value = ''; error.value = ''; linkAction.value = action; linkToken.value = token; view.value = 'security' }
 function openRecovery() { authOpen.value = false; view.value = 'security'; error.value = '' }
@@ -129,7 +159,7 @@ onMounted(load)
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.15</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.16</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
@@ -137,9 +167,10 @@ onMounted(load)
      <div v-if="development" class="dev-banner"><span>开发体验环境</span> 测试支付不会扣款；支付宝、微信等支付渠道以收银台为准。</div>
      <div v-if="error && !authOpen && !planOpen" role="alert" class="alert error">{{ error }} <button @click="load">重新加载</button></div>
      <div v-if="notice" role="status" class="alert success">{{ notice }}</div>
+     <div v-if="mfaLocked" role="status" class="alert mfa-required-banner">{{ mfaEnrollmentRequired ? '后台需要先设置验证器，完成二次验证后才能使用管理功能。' : '后台二次验证尚未完成或已过期，请在账号安全中验证。' }} <NButton size="small" @click="view = 'security'">前往后台二次验证</NButton></div>
      <div v-if="loading" class="loading">正在准备你的空间…</div>
      <template v-else>
-      <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
+      <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @mfa-disabled="mfaSignedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
       <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" :can-request-refund="can('refunds.request')" :can-close="can('payments.close')" :actions-enabled="paymentActionsEnabled" />
       <RefundOperations v-if="view === 'refunds' && can('refunds.read')" :can-approve="can('refunds.approve')" :actions-enabled="paymentActionsEnabled" />
       <FundLedgers v-if="view === 'funds' && can('funds.read')" :can-import="can('funds.import')" :can-reconcile="can('funds.reconcile')" />

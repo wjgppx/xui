@@ -29,7 +29,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: go test -race -count=1 -p 1 ./...
-      - run: go vet ./...
+      - run: go vet -tags=xrayintegration,acceptance ./...
+      - name: Verify private backup and release tooling
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Verify concurrent usage and outage recovery
+        run: bash scripts/test-acceptance.sh
       - name: Verify TLS, metering and subscription clients
         env:
           XUI_TOOLS_DIR: ${{ runner.temp }}/xui-tools

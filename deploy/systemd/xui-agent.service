@@ -1,0 +1,33 @@
+[Unit]
+Description=XUI node agent and managed Xray process
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=xui-agent
+Group=xui-agent
+WorkingDirectory=/var/lib/xui-agent
+EnvironmentFile=/etc/xui/agent.env
+# Replace the controller origin and install the separately verified Xray binary.
+ExecStart=/srv/xui-agent/current/bin/xui-agent --controller=https://panel.example.com --state=/var/lib/xui-agent/identity.json --xray=/usr/local/lib/xui/xray --certificates=/etc/xui/node-certificates
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+# SIGTERM first reaches the agent so it can sample/stop Xray and flush its outbox.
+# Any remaining descendant is killed only after the stop deadline.
+KillMode=mixed
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xui-agent
+ReadOnlyPaths=/srv/xui-agent /etc/xui /usr/local/lib/xui
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -17,12 +16,15 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/wjgppx/xui/internal/clientip"
 	"github.com/wjgppx/xui/internal/payments"
 	"github.com/wjgppx/xui/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Config struct {
+	TrustedProxy          *clientip.Policy
+	ReleaseID             string
 	Origin                string
 	Development           bool
 	SecureCookies         bool
@@ -30,6 +32,8 @@ type Config struct {
 	Payments              *payments.Registry
 	PaymentActionsEnabled bool
 	BillDownloadsEnabled  bool
+	MFAKey                []byte
+	RequireStaffMFA       bool
 	// PasswordCost defaults to bcrypt.DefaultCost. Tests can use bcrypt.MinCost
 	// to exercise authentication without race-instrumentation CPU amplification.
 	PasswordCost int
@@ -40,6 +44,10 @@ type Server struct {
 }
 
 func New(s *store.Store, c Config) *Server {
+	if len(c.MFAKey) != 0 && len(c.MFAKey) != 32 {
+		panic("invalid MFA encryption key")
+	}
+	c.MFAKey = append([]byte(nil), c.MFAKey...)
 	if c.PasswordCost == 0 {
 		c.PasswordCost = bcrypt.DefaultCost
 	}
@@ -56,6 +64,7 @@ func New(s *store.Store, c Config) *Server {
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", s.health)
+	m.HandleFunc("GET /readyz", s.readiness)
 	m.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]bool{"development_payments": s.Config.Development, "development_mail": s.Config.Development, "email_verification_required": s.Config.RequireVerified, "payment_actions_enabled": s.Config.PaymentActionsEnabled, "bill_downloads_enabled": s.Config.BillDownloadsEnabled})
 	})
@@ -63,6 +72,11 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/login", s.login)
 	m.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	m.HandleFunc("GET /api/v1/me", s.me)
+	m.HandleFunc("GET /api/v1/me/mfa", s.mfaStatus)
+	m.HandleFunc("POST /api/v1/me/mfa/setup", s.mfaSetup)
+	m.HandleFunc("POST /api/v1/me/mfa/confirm", s.mfaConfirm)
+	m.HandleFunc("POST /api/v1/me/mfa/verify", s.mfaVerify)
+	m.HandleFunc("POST /api/v1/me/mfa/disable", s.mfaDisable)
 	m.HandleFunc("POST /api/v1/me/email-verification", s.requestVerification)
 	m.HandleFunc("POST /api/v1/auth/email/confirm", s.confirmEmail)
 	m.HandleFunc("POST /api/v1/auth/password/forgot", s.forgotPassword)
@@ -141,6 +155,11 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
+		var addressOK bool
+		r, addressOK = s.addressRequest(w, r)
+		if !addressOK {
+			return
+		}
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
 			machineWrite := r.URL.Path == "/agent/v1/enroll" || r.URL.Path == "/agent/v1/heartbeat" || r.URL.Path == "/agent/v1/applied-state" || r.URL.Path == "/agent/v1/usage-batches"
 			callback := paymentNotificationPath(r.URL.Path)
@@ -195,10 +214,7 @@ func serverError(w http.ResponseWriter, err error) {
 func hash(s string) string                     { v := sha256.Sum256([]byte(s)); return hex.EncodeToString(v[:]) }
 func (s *Server) allowed(r *http.Request) bool { return s.allowedKey(r, "", 20) }
 func (s *Server) allowedKey(r *http.Request, prefix string, limit int) bool {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := clientAddress(r)
 	allowed, err := s.Store.AllowRate(r.Context(), prefix+ip, limit, time.Minute)
 	if err != nil {
 		slog.Warn("request limiter unavailable")
@@ -258,6 +274,10 @@ func (s *Server) newSession(w http.ResponseWriter, r *http.Request, u store.User
 		return
 	}
 	u.Permissions = permissions(u.Role)
+	if _, err = s.decorateUserMFA(r.Context(), &u, hash(token)); err != nil {
+		fail(w, http.StatusServiceUnavailable, "暂时无法读取账号安全状态")
+		return
+	}
 	http.SetCookie(w, &http.Cookie{Name: "xui_session", Value: token, Path: "/", HttpOnly: true, Secure: s.Config.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: 86400})
 	reply(w, 200, u)
 }
@@ -350,6 +370,25 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request, admin bool) (st
 	if s.Config.RequireVerified && u.EmailVerifiedAt == nil && verificationProtected(r) {
 		fail(w, 403, "请先完成邮箱验证")
 		return u, false
+	}
+	status, err := s.decorateUserMFA(r.Context(), &u, hash(c.Value))
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "暂时无法读取账号安全状态")
+		return u, false
+	}
+	if admin && u.MFARequired {
+		if status.Enabled && len(s.Config.MFAKey) != 32 {
+			fail(w, http.StatusServiceUnavailable, "二次验证暂时不可用，请联系主机管理员")
+			return u, false
+		}
+		if !status.Enabled {
+			reply(w, http.StatusForbidden, map[string]string{"error": "请先在账号安全中启用二次验证", "code": "mfa_enrollment_required"})
+			return u, false
+		}
+		if status.VerifiedUntil == nil {
+			reply(w, http.StatusForbidden, map[string]string{"error": "请先完成二次验证后再访问后台", "code": "mfa_required"})
+			return u, false
+		}
 	}
 	u.Permissions = permissions(u.Role)
 	return u, true

@@ -6,6 +6,8 @@ bin/
 playwright-report/
 test-results/
 *.log
+__pycache__/
+*.pyc
 
 .env
 .env.*

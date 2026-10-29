@@ -73,11 +73,12 @@ func New(config Config) (Sender, error) {
 	return &smtpSender{config: config}, nil
 }
 func encodeMessage(from string, m Message) ([]byte, error) {
-	if !messageIDPattern.MatchString(m.ID) || !bareMailbox(m.To) || !headerText(m.Subject) || len(m.Subject) > 300 || !utf8.ValidString(m.Body) || len(m.Body) > 65536 {
+	if !bareMailbox(from) || !messageIDPattern.MatchString(m.ID) || !bareMailbox(m.To) || !headerText(m.Subject) || len(m.Subject) > 300 || !utf8.ValidString(m.Body) || len(m.Body) > 65536 {
 		return nil, ErrMessage
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s@xui.local>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from, m.To, mime.QEncoding.Encode("UTF-8", m.Subject), time.Now().UTC().Format(time.RFC1123Z), m.ID)
+	domain := strings.ToLower(from[strings.LastIndex(from, "@")+1:])
+	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s@%s>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from, m.To, mime.QEncoding.Encode("UTF-8", m.Subject), time.Now().UTC().Format(time.RFC1123Z), m.ID, domain)
 	writer := quotedprintable.NewWriter(&b)
 	if _, err := writer.Write([]byte(m.Body)); err != nil {
 		return nil, ErrMessage

@@ -18,12 +18,22 @@ import (
 
 func main() { os.Exit(run()) }
 func run() int {
+	hotEnvironment := os.Getenv("XUI_HOT_ADD_USERS")
+	if hotEnvironment != "" && hotEnvironment != "true" && hotEnvironment != "false" {
+		slog.Error("XUI_HOT_ADD_USERS must be true or false")
+		return 1
+	}
 	controller := flag.String("controller", "", "Control plane HTTPS origin (loopback HTTP allowed for development)")
 	state := flag.String("state", ".local/agent/identity.json", "Private identity state path")
 	once := flag.Bool("once", false, "Observe configuration and report once; no persistent proxy service")
 	binary := flag.String("xray", "", "Xray executable; omit for observation-only mode")
 	certificates := flag.String("certificates", "", "Directory containing <reference>.crt and private <reference>.key")
+	hotAddUsers := flag.Bool("hot-add-users", hotEnvironment == "true", "Opt in to local HandlerService for add-only users without restarting Xray")
 	flag.Parse()
+	if *hotAddUsers && *binary == "" {
+		slog.Error("--hot-add-users requires --xray")
+		return 1
+	}
 	if *once && *binary != "" {
 		slog.Error("--once cannot own a persistent Xray service")
 		return 1
@@ -51,6 +61,13 @@ func run() int {
 		if err != nil {
 			slog.Error("runtime initialization failed", "error", err)
 			return 1
+		}
+		if *hotAddUsers {
+			if err = runtime.EnableHotAdd(); err != nil {
+				_ = runtime.Close()
+				slog.Error("hot user update configuration invalid")
+				return 1
+			}
 		}
 		c.Outbox = ledger
 		c.Runtime = runtime
@@ -108,7 +125,7 @@ func run() int {
 				delay = time.Minute
 			}
 		} else {
-			slog.Info("node sync accepted", "node_id", c.State.NodeID, "observed_revision", c.State.ObservedRevision, "runtime_enabled", c.Runtime != nil)
+			slog.Info("node sync accepted", "node_id", c.State.NodeID, "observed_revision", c.State.ObservedRevision, "runtime_enabled", c.Runtime != nil, "hot_add_users_enabled", *hotAddUsers)
 			if *once {
 				return 0
 			}

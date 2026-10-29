@@ -198,7 +198,7 @@ func TestSMTPVerifiedSTARTTLSMessageEncodingAndAcceptedDataBoundary(t *testing.T
 		if err != nil || strings.TrimSuffix(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") != testMessage().Body {
 			t.Fatal("mail body encoding corrupted")
 		}
-		if message.Header.Get("Message-ID") != "<"+testMessage().ID+"@xui.local>" {
+		if message.Header.Get("Message-ID") != "<"+testMessage().ID+"@example.test>" {
 			t.Fatal("unstable message identity")
 		}
 	case <-time.After(time.Second):

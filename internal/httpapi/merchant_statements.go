@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -141,10 +140,7 @@ func (s *Server) statementWriteUser(w http.ResponseWriter, r *http.Request, purp
 	if !ok {
 		return u, false
 	}
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := clientAddress(r)
 	// Keep per-peer and per-user limits independent. In particular a limiter
 	// storage error is unavailable, rather than a misleading rate-limit result.
 	for _, key := range []string{"statement-peer:" + purpose + ":" + ip, "statement-user:" + purpose + ":" + u.ID} {

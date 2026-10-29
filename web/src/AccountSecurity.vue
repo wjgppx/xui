@@ -2,8 +2,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NInput, NTag } from 'naive-ui'
 import { api, type User } from './api'
+import StaffMFA from './StaffMFA.vue'
 const props = defineProps<{ user: User | null; developmentMail: boolean; verificationRequired: boolean; linkAction: 'verify' | 'reset' | null; linkToken: string }>()
-const emit = defineEmits<{ verified: []; signedOut: []; consumed: []; login: []; mailAction: [action: 'verify' | 'reset', token: string] }>()
+const emit = defineEmits<{ verified: []; signedOut: []; mfaDisabled: []; consumed: []; login: []; mailAction: [action: 'verify' | 'reset', token: string] }>()
 interface DevelopmentMail { id: string; subject: string; body: string; created_at: string }
 const busy = ref(false), error = ref(''), notice = ref(''), inbox = ref<DevelopmentMail[]>([]), inboxOpen = ref(false)
 const recoveryEmail = ref(''), currentPassword = ref(''), newPassword = ref(''), repeatPassword = ref('')
@@ -83,7 +84,8 @@ onBeforeUnmount(() => { mounted = false; inbox.value = []; currentPassword.value
    </form>
   </section>
  </div>
- <section v-else-if="!linkAction" class="panel recovery-panel">
+ <StaffMFA v-if="user && user.role !== 'user' && !linkAction && (!verificationRequired || user.email_verified_at)" :key="user.id" @verified="emit('verified')" @disabled="emit('mfaDisabled')" />
+ <section v-if="!user && !linkAction" class="panel recovery-panel">
   <h2>找回密码</h2><p class="muted">输入注册邮箱，我们会向符合条件的账号发送重置链接。</p>
   <form @submit.prevent="requestRecovery"><label>注册邮箱<NInput v-model:value="recoveryEmail" :input-props="{ type: 'email', required: true, autocomplete: 'email', 'aria-label': '找回密码邮箱' }" /></label><div class="security-actions"><NButton attr-type="submit" type="primary" :loading="busy">发送重置邮件</NButton><NButton :disabled="busy" @click="emit('login')">返回登录</NButton></div></form>
  </section>

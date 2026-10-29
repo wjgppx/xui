@@ -1,4 +1,8 @@
-export interface User { id: string; email: string; role: 'user' | 'admin' | 'support' | 'finance' | 'operator'; email_verified_at: string | null; permissions: string[] }
+export interface User { id: string; email: string; role: 'user' | 'admin' | 'support' | 'finance' | 'operator'; email_verified_at: string | null; permissions: string[]; mfa_enabled?: boolean; mfa_required?: boolean; mfa_verified_until?: string | null }
+export interface StaffMFAStatus { available: boolean; enabled: boolean; required: boolean; verified_until: string | null; setup_pending: boolean; recovery_codes_remaining: number }
+export class APIError extends Error {
+ constructor(message: string, public status: number, public code?: string) { super(message); this.name = 'APIError' }
+}
 export interface Plan { id: string; name: string; description: string; price_minor: number; currency: string; duration_days: number; quota_bytes: number }
 export interface Order extends Omit<Plan, 'name' | 'description'> { user_id: string; plan_id: string; plan_name: string; status: 'pending' | 'expired' | 'closing' | 'closed' | 'paid' | 'refunded'; created_at: string; paid_at: string | null; expires_at?: string | null; closed_at?: string | null }
 export interface Entitlement { revoked_at?: string | null; id: string; order_id: string; plan_name: string; starts_at: string; ends_at: string; quota_bytes: number; used_bytes: number }
@@ -8,7 +12,11 @@ export interface Payment { id: string; order_id: string; provider: PaymentMethod
 export async function api<T>(path: string, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
  const response = await fetch('/api/v1' + path, { credentials: 'same-origin', method: body === undefined ? 'GET' : method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
  const data = await response.json()
- if (!response.ok) throw new Error(data.error || '请求失败，请稍后再试')
+ if (!response.ok) {
+  const code = typeof data.code === 'string' ? data.code : undefined
+  if (response.status === 403 && (code === 'mfa_required' || code === 'mfa_enrollment_required')) window.dispatchEvent(new CustomEvent('xui:mfa-required', { detail: code }))
+  throw new APIError(data.error || '请求失败，请稍后再试', response.status, code)
+ }
  return data as T
 }
 

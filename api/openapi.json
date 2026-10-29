@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.15.0",
-    "description": "Independent subscription platform with verified payment adapters and read-only financial observations. Adds immutable manually normalized merchant/bank fund-flow batches, fixed account-alias provider scopes, exact five-decimal yuan balance continuity checks, and explicit withdrawal/bank-record comparisons by account pair and transfer reference. Balance discrepancies and partial-source warnings remain visible; duplicate transfer references are ambiguous and overlapping batches are never accumulated as a current balance. This increment does not connect to a bank, download official fund-flow files, create withdrawals, confirm actual arrival, settle payments/refunds or change entitlements. Official profiles/downloads and real merchant/bank acceptance remain pending."
+    "version": "0.16.0",
+    "description": "Independent subscription platform with verified payment adapters and immutable financial observations. Adds staff TOTP/recovery-code enrollment and session step-up, explicit trusted-proxy rate-limit identity, and release/schema readiness. Production staff MFA defaults to required; a private stable encryption key must be configured. Operational tooling covers isolated backup/restore, usage fault/load acceptance, and compatible release activation/rollback. Short local tests do not establish long-term production stability, real merchant settlement or external mailbox delivery."
   },
   "paths": {
     "/healthz": {
@@ -4455,6 +4455,290 @@
           }
         ]
       }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Database readiness with exact release and schema identity",
+        "operationId": "get_readyz",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "HTTP 503 on database/schema query failure. Release activation must match the expected release exactly; /healthz alone cannot identify a candidate."
+      }
+    },
+    "/api/v1/me/mfa": {
+      "get": {
+        "summary": "Current staff second-factor status",
+        "operationId": "get_api_v1_me_mfa",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MFAStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Staff accounts only; production email verification is required. No query parameters. Responses are no-store. Each write purpose has shared PostgreSQL limits of five attempts per minute per client address and per account. Status remains available while administration is locked."
+      }
+    },
+    "/api/v1/me/mfa/setup": {
+      "post": {
+        "summary": "Begin encrypted staff TOTP enrollment",
+        "operationId": "post_api_v1_me_mfa_setup",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MFASetup"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Staff accounts only; production email verification is required. No query parameters. Responses are no-store. Each write purpose has shared PostgreSQL limits of five attempts per minute per client address and per account. Requires current password and no enrolled factor. Pending setup expires in ten minutes and is bound to the current session/security version. Calling again replaces pending setup.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MFASetupRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/mfa/confirm": {
+      "post": {
+        "summary": "Confirm enrollment, rotate session and disclose recovery codes once",
+        "operationId": "post_api_v1_me_mfa_confirm",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MFARecoveryCodes"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Staff accounts only; production email verification is required. No query parameters. Responses are no-store. Each write purpose has shared PostgreSQL limits of five attempts per minute per client address and per account. Consumes pending TOTP, atomically enrolls the factor, revokes all previous sessions and sets a new HttpOnly session cookie already verified for fifteen minutes. Recovery code plaintext is never returned again.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MFAConfirmRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/mfa/verify": {
+      "post": {
+        "summary": "Step up current staff session",
+        "operationId": "post_api_v1_me_mfa_verify",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MFAVerification"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Staff accounts only; production email verification is required. No query parameters. Responses are no-store. Each write purpose has shared PostgreSQL limits of five attempts per minute per client address and per account. TOTP counter replay and recovery-code reuse are rejected across sessions. Verification grants up to fifteen minutes on this session without extending its login expiry. Password reset preserves the factor.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MFACodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/mfa/disable": {
+      "post": {
+        "summary": "Disable factor with password and unused second-factor credential",
+        "operationId": "post_api_v1_me_mfa_disable",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OK"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request rejected or service failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Staff accounts only; production email verification is required. No query parameters. Responses are no-store. Each write purpose has shared PostgreSQL limits of five attempts per minute per client address and per account. Revokes every account session and clears the cookie. When enrollment is required, the next login must enroll before administration can be used.",
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MFADisableRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4477,6 +4761,14 @@
         "properties": {
           "error": {
             "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "mfa_required",
+              "mfa_enrollment_required"
+            ],
+            "description": "Optional finite machine-readable staff step-up reason on HTTP 403."
           }
         },
         "required": [
@@ -4533,6 +4825,22 @@
               "type": "string"
             },
             "description": "Server-computed permissions used for staff navigation; each request is still authorized independently."
+          },
+          "mfa_enabled": {
+            "type": "boolean",
+            "description": "Whether this staff account has an enrolled second factor."
+          },
+          "mfa_required": {
+            "type": "boolean",
+            "description": "Whether staff administration currently requires step-up (enabled accounts always require it)."
+          },
+          "mfa_verified_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Current session step-up expiry; null when unverified or expired."
           }
         },
         "required": [
@@ -8954,6 +9262,175 @@
           "bank_batch_id"
         ],
         "description": "Explicit immutable batch pair only; merchant provider must be alipay/wechat, bank provider bank and account aliases differ. Wrong pair409; no supplied account overrides, transfer status, amounts, credentials or bank URLs."
+      },
+      "Readiness": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "release": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "status",
+          "release",
+          "schema_version"
+        ]
+      },
+      "MFAStatus": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "A 32-byte host encryption key is configured; enrolled accounts fail closed if it is unavailable."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "verified_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "setup_pending": {
+            "type": "boolean",
+            "description": "Pending enrollment belongs to this current session and security version and has not expired."
+          },
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "available",
+          "enabled",
+          "required",
+          "verified_until",
+          "setup_pending",
+          "recovery_codes_remaining"
+        ]
+      },
+      "MFASetupRequest": {
+        "type": "object",
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 12,
+            "maxLength": 72
+          }
+        },
+        "required": [
+          "current_password"
+        ]
+      },
+      "MFASetup": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "type": "string",
+            "description": "Base32 TOTP secret, disclosed only for pending enrollment; never persist in browser storage."
+          },
+          "otpauth_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "secret",
+          "otpauth_url",
+          "expires_at"
+        ]
+      },
+      "MFAConfirmRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "MFACodeRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Unused six-digit TOTP or one unused 32-character hexadecimal recovery code."
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "MFADisableRequest": {
+        "type": "object",
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 12,
+            "maxLength": 72
+          },
+          "code": {
+            "type": "string",
+            "description": "Unused six-digit TOTP or one unused 32-character hexadecimal recovery code."
+          }
+        },
+        "required": [
+          "current_password",
+          "code"
+        ]
+      },
+      "MFARecoveryCodes": {
+        "type": "object",
+        "properties": {
+          "recovery_codes": {
+            "type": "array",
+            "minItems": 10,
+            "maxItems": 10,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Returned once after enrollment. Store offline; the server stores hashes and each code can be consumed only once."
+          }
+        },
+        "required": [
+          "recovery_codes"
+        ]
+      },
+      "MFAVerification": {
+        "type": "object",
+        "properties": {
+          "verified_until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "verified_until"
+        ]
       }
     }
   },

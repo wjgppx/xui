@@ -58,6 +58,9 @@ var statementFinancialsSchema string
 //go:embed fund_ledgers.sql
 var fundLedgersSchema string
 
+//go:embed mfa.sql
+var mfaSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -67,12 +70,15 @@ type Store struct {
 	RequireVerified bool
 }
 type User struct {
-	EmailVerifiedAt *time.Time `json:"email_verified_at"`
-	SecurityVersion int64      `json:"-"`
-	Permissions     []string   `json:"permissions"`
-	ID              string     `json:"id"`
-	Email           string     `json:"email"`
-	Role            string     `json:"role"`
+	MFAEnabled       bool       `json:"mfa_enabled"`
+	MFARequired      bool       `json:"mfa_required"`
+	MFAVerifiedUntil *time.Time `json:"mfa_verified_until"`
+	EmailVerifiedAt  *time.Time `json:"email_verified_at"`
+	SecurityVersion  int64      `json:"-"`
+	Permissions      []string   `json:"permissions"`
+	ID               string     `json:"id"`
+	Email            string     `json:"email"`
+	Role             string     `json:"role"`
 }
 type Plan struct {
 	ID          string `json:"id"`
@@ -129,7 +135,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema, merchantStatementsSchema, billDownloadsSchema, billSchedulesSchema, statementFinancialsSchema, fundLedgersSchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema, merchantStatementsSchema, billDownloadsSchema, billSchedulesSchema, statementFinancialsSchema, fundLedgersSchema, mfaSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err

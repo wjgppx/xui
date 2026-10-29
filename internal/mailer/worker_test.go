@@ -42,7 +42,7 @@ func TestMailWorkerDeliversOverVerifiedSMTPAndScrubsBody(t *testing.T) {
 	}
 	select {
 	case data := <-fixture.messages:
-		if !strings.Contains(string(data), "Message-ID: <"+id+"@xui.local>") {
+		if !strings.Contains(string(data), "Message-ID: <"+id+"@example.test>") {
 			t.Fatal("outbox identity not preserved in SMTP")
 		}
 	default:

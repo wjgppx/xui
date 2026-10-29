@@ -45,6 +45,10 @@ type Runtime struct {
 	lease                           time.Time
 	timer                           *time.Timer
 	closed                          bool
+	hotAdd                          bool
+	hotShape                        string
+	bindings                        []agentwire.Binding
+	hotCommand                      func(context.Context, string, ...string) ([]byte, error)
 	// Only the build-tagged integration fixture sets a narrow local echo exception.
 	testOutbound map[string]any
 }
@@ -89,9 +93,9 @@ func New(binary, directory, certificates string) (*Runtime, error) {
 	return &Runtime{binary: bin, directory: directory, certificates: certificates, lock: lock, apiPort: port}, nil
 }
 
-func (r *Runtime) render(d agentwire.DesiredState) ([]byte, []probe, string, error) {
+func (r *Runtime) render(d agentwire.DesiredState) ([]byte, []probe, string, string, error) {
 	if len(d.Bindings) > 8 {
-		return nil, nil, "", fail("config_rejected")
+		return nil, nil, "", "", fail("config_rejected")
 	}
 	inbounds := []any{map[string]any{"tag": "xui-meter", "listen": "127.0.0.1", "port": r.apiPort, "protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"}}}
 	probes := []probe{}
@@ -99,7 +103,7 @@ func (r *Runtime) render(d agentwire.DesiredState) ([]byte, []probe, string, err
 	fingerprint := sha256.New()
 	for _, b := range d.Bindings {
 		if agentwire.ValidateBinding(b) != nil || b.Port == r.apiPort || ids[b.ID] || ports[b.Port] || b.Clients == nil || len(b.Clients) > 100 {
-			return nil, nil, "", fail("config_rejected")
+			return nil, nil, "", "", fail("config_rejected")
 		}
 		ids[b.ID], ports[b.Port] = true, true
 		certPath := filepath.Join(r.certificates, b.Certificate+".crt")
@@ -107,36 +111,44 @@ func (r *Runtime) render(d agentwire.DesiredState) ([]byte, []probe, string, err
 		for _, path := range []string{certPath, keyPath} {
 			info, err := os.Lstat(path)
 			if err != nil || !info.Mode().IsRegular() || info.Size() > 1048576 || (path == keyPath && info.Mode().Perm()&0077 != 0) {
-				return nil, nil, "", fail("config_rejected")
+				return nil, nil, "", "", fail("config_rejected")
 			}
 		}
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			return nil, nil, "", fail("config_rejected")
+			return nil, nil, "", "", fail("config_rejected")
 		}
 		leaf, err := x509.ParseCertificate(cert.Certificate[0])
 		if err != nil || leaf.VerifyHostname(b.ServerName) != nil || time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
-			return nil, nil, "", fail("config_rejected")
+			return nil, nil, "", "", fail("config_rejected")
 		}
 		roots := x509.NewCertPool()
 		roots.AddCert(leaf)
-		fingerprint.Write(cert.Certificate[0])
+		for _, der := range cert.Certificate {
+			fingerprint.Write(der)
+		}
+		privateMaterial, keyErr := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+		if keyErr != nil {
+			return nil, nil, "", "", fail("config_rejected")
+		}
+		fingerprint.Write(privateMaterial)
+		clear(privateMaterial)
 		clients := []any{}
-		users := map[string]bool{}
+		users, credentials := map[string]bool{}, map[string]bool{}
 		for _, u := range b.Clients {
-			if !subjectID.MatchString(u.UserID) || !subjectID.MatchString(u.EntitlementID) || users[u.UserID] || u.ExpiresAt.Before(d.LeaseExpiresAt) {
-				return nil, nil, "", fail("config_rejected")
+			if !subjectID.MatchString(u.UserID) || !subjectID.MatchString(u.EntitlementID) || users[u.UserID] || credentials[u.Credential] || u.ExpiresAt.Before(d.LeaseExpiresAt) {
+				return nil, nil, "", "", fail("config_rejected")
 			}
-			users[u.UserID] = true
+			users[u.UserID], credentials[u.Credential] = true, true
 			c := map[string]any{"email": b.ID + "." + u.UserID + "." + u.EntitlementID, "level": 0}
 			if b.Protocol == "vless" {
 				if !uuidPattern.MatchString(u.Credential) {
-					return nil, nil, "", fail("config_rejected")
+					return nil, nil, "", "", fail("config_rejected")
 				}
 				c["id"] = u.Credential
 			} else {
 				if !secretPattern.MatchString(u.Credential) {
-					return nil, nil, "", fail("config_rejected")
+					return nil, nil, "", "", fail("config_rejected")
 				}
 				c["password"] = u.Credential
 			}
@@ -161,13 +173,26 @@ func (r *Runtime) render(d agentwire.DesiredState) ([]byte, []probe, string, err
 	if r.testOutbound != nil {
 		outbound = r.testOutbound
 	}
-	config := map[string]any{"api": map[string]any{"tag": "xui-meter", "services": []string{"StatsService"}}, "routing": map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"xui-meter"}, "outboundTag": "xui-meter"}}}, "log": map[string]any{"loglevel": "none"}, "inbounds": inbounds, "outbounds": []any{map[string]any{"protocol": "freedom", "settings": outbound}}, "stats": map[string]any{}, "policy": map[string]any{"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}}}}
+	services := []string{"StatsService"}
+	if r.hotAdd {
+		services = append(services, "HandlerService")
+	}
+	config := map[string]any{"api": map[string]any{"tag": "xui-meter", "services": services}, "routing": map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"xui-meter"}, "outboundTag": "xui-meter"}}}, "log": map[string]any{"loglevel": "none"}, "inbounds": inbounds, "outbounds": []any{map[string]any{"protocol": "freedom", "settings": outbound}}, "stats": map[string]any{}, "policy": map[string]any{"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}}}}
 	data, err := json.Marshal(config)
 	if err != nil {
-		return nil, nil, "", fail("config_rejected")
+		return nil, nil, "", "", fail("config_rejected")
+	}
+	shape, shapeErr := renderShape(config, fingerprint.Sum(nil))
+	if shapeErr != nil {
+		return nil, nil, "", "", fail("config_rejected")
+	}
+	policies, policyErr := json.Marshal(copyBindings(d.Bindings))
+	if policyErr != nil {
+		return nil, nil, "", "", fail("config_rejected")
 	}
 	fingerprint.Write(data)
-	return data, probes, hex.EncodeToString(fingerprint.Sum(nil)), nil
+	fingerprint.Write(policies)
+	return data, probes, hex.EncodeToString(fingerprint.Sum(nil)), shape, nil
 }
 
 func (r *Runtime) aliveLocked() bool {
@@ -204,6 +229,9 @@ func (r *Runtime) stopLocked() {
 func (r *Runtime) leaseLocked(until time.Time) {
 	r.leaseMu.Lock()
 	defer r.leaseMu.Unlock()
+	r.installLeaseTimerLocked(until)
+}
+func (r *Runtime) installLeaseTimerLocked(until time.Time) {
 	r.lease = until
 	if r.timer != nil {
 		r.timer.Stop()
@@ -284,7 +312,7 @@ func (r *Runtime) Apply(ctx context.Context, d agentwire.DesiredState) (string, 
 	if !time.Now().Before(d.LeaseExpiresAt) || time.Until(d.LeaseExpiresAt) > 90*time.Second {
 		return "", fail("lease_invalid")
 	}
-	data, probes, digest, err := r.render(d)
+	data, probes, digest, shape, err := r.render(d)
 	if err != nil {
 		return "", err
 	}
@@ -303,7 +331,8 @@ func (r *Runtime) Apply(ctx context.Context, d agentwire.DesiredState) (string, 
 		}
 		r.active = ""
 		r.probes = nil
-		r.digest = digest
+		r.digest, r.hotShape = digest, shape
+		r.bindings = copyBindings(d.Bindings)
 		r.instance = "stopped"
 		r.leaseLocked(d.LeaseExpiresAt)
 		return r.instance, nil
@@ -331,6 +360,20 @@ func (r *Runtime) Apply(ctx context.Context, d agentwire.DesiredState) (string, 
 	if err = exec.CommandContext(checkCtx, r.binary, "run", "-test", "-config", candidate).Run(); err != nil {
 		return "", fail("config_rejected")
 	}
+	if r.hotAdd && r.hotShape == shape && r.aliveLocked() {
+		if additions, eligible := hotAdditions(r.bindings, d.Bindings); eligible {
+			if err = r.hotUpdateLocked(ctx, d, additions); err != nil {
+				return "", err
+			}
+			previous := r.active
+			r.active, r.digest, r.hotShape = candidate, digest, shape
+			r.probes, r.bindings = probes, copyBindings(d.Bindings)
+			if previous != "" {
+				os.Remove(previous)
+			}
+			return r.instance, nil
+		}
+	}
 	previous, previousLease, previousProbes := r.active, r.lease, r.probes
 	if err := r.sampleLocked(ctx); err != nil {
 		r.stopLocked()
@@ -351,8 +394,8 @@ func (r *Runtime) Apply(ctx context.Context, d agentwire.DesiredState) (string, 
 	if previous != "" {
 		os.Remove(previous)
 	}
-	r.active, r.digest = candidate, digest
-	r.probes = probes
+	r.active, r.digest, r.hotShape = candidate, digest, shape
+	r.probes, r.bindings = probes, copyBindings(d.Bindings)
 	r.leaseLocked(d.LeaseExpiresAt)
 	return r.instance, nil
 }

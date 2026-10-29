@@ -1,0 +1,30 @@
+[Unit]
+Description=XUI control API and durable workers
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=xui
+Group=xui
+WorkingDirectory=/var/lib/xui
+EnvironmentFile=/etc/xui/control.env
+ExecStart=/srv/xui/current/bin/xui-control
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xui
+ReadOnlyPaths=/srv/xui /etc/xui
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
