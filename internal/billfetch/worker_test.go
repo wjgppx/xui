@@ -129,6 +129,10 @@ func TestDownloadedBillImportsOnceWithoutSettlingItsObservedPayment(t *testing.T
 	if err != nil || detail.Statement.Coverage != "full" || detail.LatestRun.DifferenceCount != 1 || len(detail.Sources) != 1 || detail.Sources[0].Integrity != "wechat_signed_sha1" || detail.Sources[0].Kind != "download" {
 		t.Fatal("provenance or observation lost", detail, err)
 	}
+	financials, err := s.SourceFinancials(context.Background(), detail.Statement.ID, detail.Sources[0].ID)
+	if err != nil || !financials.Available || financials.FeeTotalYuan == nil || *financials.FeeTotalYuan != "0.00000" || financials.ChannelAmountTotalYuan == nil || *financials.ChannelAmountTotalYuan != "18.00000" || len(financials.SummaryCodes) != 0 {
+		t.Fatal("download did not atomically retain exact financial observations", financials, err)
+	}
 	var paymentStatus string
 	var grants, events int
 	err = s.DB.QueryRow(context.Background(), `SELECT p.status,(SELECT count(*) FROM entitlement_periods),(SELECT count(*) FROM payment_events) FROM payment_intents p WHERE id=$1`, p.ID).Scan(&paymentStatus, &grants, &events)
@@ -262,6 +266,10 @@ func TestBillImportStorageFailureRollsBackAndRecoversByFreshDownload(t *testing.
 	if err != nil || len(all) != 0 {
 		t.Fatal("failed completion committed observations", all, err)
 	}
+	var financialCount int
+	if err = s.DB.QueryRow(ctx, `SELECT count(*) FROM merchant_statement_financials`).Scan(&financialCount); err != nil || financialCount != 0 {
+		t.Fatal("failed completion leaked financial snapshot", financialCount, err)
+	}
 	jobs, err := s.ListBillDownloads(ctx)
 	if err != nil || len(jobs) != 1 || jobs[0].Status != "waiting" || jobs[0].LastOutcome != "storage_error" {
 		t.Fatal(jobs, err)
@@ -273,5 +281,8 @@ func TestBillImportStorageFailureRollsBackAndRecoversByFreshDownload(t *testing.
 	all, err = s.ListStatements(ctx)
 	if err != nil || len(all) != 1 || calls != 2 {
 		t.Fatal("recovery lost or duplicated observations", all, calls, err)
+	}
+	if err = s.DB.QueryRow(ctx, `SELECT count(*) FROM merchant_statement_financials`).Scan(&financialCount); err != nil || financialCount != 1 {
+		t.Fatal("financial snapshot lost or duplicated during recovery", financialCount, err)
 	}
 }

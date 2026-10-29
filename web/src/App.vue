@@ -127,7 +127,7 @@ onMounted(load)
      <button v-if="can('users.read')" :class="{ selected: view === 'staff' }" @click="view = 'staff'"><span class="nav-icon">♧</span>后台账号</button>
     </nav>
     <div class="sidebar-note"><span class="mini-orbit">◎</span><h3>连接，每一种可能。</h3><p>让每一次连接，<br/>都有清晰可见的状态。</p></div>
-    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.13</span></div>
+    <div class="sidebar-footer"><span class="status-dot"></span> XUI · 开发版本 <span>0.14</span></div>
    </aside>
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>

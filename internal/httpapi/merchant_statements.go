@@ -32,6 +32,7 @@ func statementValidationMessage(err error) string {
 		"transaction_id": "渠道交易号", "refund_id": "商户退款单号", "provider_refund_id": "渠道退款号",
 		"amount_minor": "金额（分）", "currency": "币种", "occurred_at": "发生时间",
 		"format": "原始账单版本", "content_base64": "原始账单文件",
+		"fee_yuan": "手续费（元）", "channel_amount_yuan": "渠道金额（元）",
 	}
 	field, known := fields[validation.Field]
 	if !known {
@@ -81,6 +82,16 @@ func statementValidationMessage(err error) string {
 		message = "无法确认空账单，请核对原始文件和支持的账单版本"
 	case "native_partial_only":
 		message = "此支付宝原始账单版本仅支持按部分账单核对"
+	case "financial_amount_invalid":
+		message = field + "必须为明确填写的十进制金额，最多 5 位小数，不使用科学计数法"
+	case "financial_amount_overflow":
+		message = "手续费、渠道金额或金额合计超出支持范围"
+	case "financial_document_invalid":
+		message = "来源金额观察未通过格式或归属校验"
+	case "financial_reference_header":
+		message = "预期金额 CSV 表头必须包含 payment_id、refund_id、expected_fee_yuan、expected_channel_amount_yuan 四列"
+	case "financial_reference_record":
+		message = "预期金额记录必须包含正确的支付/退款标识及明确填写的手续费和渠道金额"
 	default:
 		return fallback
 	}

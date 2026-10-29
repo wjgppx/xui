@@ -100,3 +100,5 @@ SMTP 接受邮件与数据库提交不能组成一个原子事务。发送成功
 账单操作分别要求 `statements.read`、`statements.import`、`statements.reconcile`、`statements.review`，仅管理员和财务具备。写入事务复核当前角色并保留审计；导入和复核不修改金融事实，不要求启用资金开关。导入/重跑按用途分别限制IP与用户各5次/分钟，备注各10次/分钟。详情见 [商户账单](merchant-statements.md)。
 
 原始上传沿用 `statements.import`；按需官方下载要求 `statements.download`，仍仅管理员/财务具备。下载任务同时绑定请求人安全版本与配置商户指纹，外呼前及导入事务复查，身份变化转人工。公开配置只返回 `bill_downloads_enabled`；不开启时拒绝新任务与启用计划，并停止下载消费者和调度器，仍可停用计划，手工导入继续可用。上传和下载请求按用途分别限制IP与当前用户各5次/分钟；下载地址、令牌和原文件不持久化或返回。边界见 [原始账单](native-bills.md)。每日计划新增 `statements.schedule`，仅管理员/财务可管理，保存按IP和当前用户各5次/分钟。计划绑定授权人、安全版本和服务端商户身份；身份变化暂停，停用或更换授权代次撤销未完成的自动任务，提交导入时再次检查。执行时间修改保留有效授权与游标；并发保存要求当前revision。详细规则见 [自动计划](bill-schedules.md)。
+
+原始账单的[费用与渠道金额核对](statement-financials.md)沿用 `statements.read` 和 `statements.reconcile`：管理员/财务可读取来源并上传明确预期CSV；生产邮箱验证、可信Origin、会话版本与用途限流继续生效。来源观察和比较报告不授权资金操作。

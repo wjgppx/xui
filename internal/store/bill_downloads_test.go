@@ -308,7 +308,7 @@ func TestBillSourcesMigrationBackfillsExistingNormalizedEvidence(t *testing.T) {
 	s := testutil.Database(t)
 	ctx := context.Background()
 	actor := actionAdmin(t, s)
-	for _, query := range []string{`ALTER TABLE bill_download_jobs DROP CONSTRAINT bill_download_jobs_schedule_id_fkey`, `DROP TABLE bill_download_schedules`, `DROP TABLE merchant_statement_sources`, `DROP TABLE bill_download_jobs`, `DELETE FROM schema_migrations WHERE version>=12`} {
+	for _, query := range []string{`DROP TABLE merchant_statement_financial_runs`, `DROP TABLE merchant_statement_financials`, `ALTER TABLE bill_download_jobs DROP CONSTRAINT bill_download_jobs_schedule_id_fkey`, `DROP TABLE bill_download_schedules`, `DROP TABLE merchant_statement_sources`, `DROP TABLE bill_download_jobs`, `DELETE FROM schema_migrations WHERE version>=12`} {
 		if _, err := s.DB.Exec(ctx, query); err != nil {
 			t.Fatal(err)
 		}

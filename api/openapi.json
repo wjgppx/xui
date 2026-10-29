@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.13.0",
-    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds opt-in daily Alipay/WeChat bill schedules with fixed Shanghai time, bounded seven-day catch-up, stable download identities, revision conflicts and revocable actor/merchant authorization. Global downloads and all four schedules default off. Imported and downloaded bills never settle/refund or change entitlements. Classic Alipay profile remains partial-only; broader formats, fees/settlement reconciliation and real merchant acceptance remain pending."
+    "version": "0.14.0",
+    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds source-bound immutable native fee/channel amount observations with exact five-decimal yuan strings and explicit reference-CSV comparisons. Different raw sources sharing canonical gross facts retain separate financial observations; missing historical fields remain unavailable until explicit same-file reimport. No fee-rate/net-amount guessing, bank settlement confirmation, payment/refund execution or entitlement change. Daily downloads remain opt-in; full fund-flow/balance reconciliation and real merchant acceptance remain pending."
   },
   "paths": {
     "/healthz": {
@@ -3760,7 +3760,7 @@
           }
         ],
         "x-required-permission": "statements.import",
-        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Max12MiB singleJSON. Rate5 per direct peer and5 per user per minute for native-import. Alipay classic profile is fixture-limited, partial-only and refuses empty selected type; it does not claim current merchant acceptance. WeChat uses gross order/requested-refund amount and explicit refund-success time, with strict summary count/sum. Valid canonical content can reuse an existing statement/report while appending immutable source audit. Native upload works with bill downloads disabled.",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Max12MiB singleJSON. Rate5 per direct peer and5 per user per minute for native-import. Alipay classic profile is fixture-limited, partial-only and refuses empty selected type; it does not claim current merchant acceptance. WeChat uses gross order/requested-refund amount and explicit refund-success time, with strict summary count/sum. Valid canonical content can reuse an existing statement/report while appending immutable source audit. Native upload works with bill downloads disabled. v0.14 attaches source-bound exact five-decimal fee/channel amount observations atomically with successful native import/download completion; no raw-file persistence. Unknown Alipay cells remain null. WeChat fee/channel summary mismatches create separate warnings without changing canonical gross reports. Existing legacy sources are not guessed/backfilled; explicit same-file native reimport may add the first immutable observation.",
         "responses": {
           "200": {
             "description": "Success",
@@ -3849,7 +3849,7 @@
           }
         ],
         "x-required-permission": "statements.download",
-        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Requires explicit BILL_DOWNLOADS_ENABLED=true and configured optional BillProvider capability (Alipay/WeChat only, no common Epay protocol). Request performs no outboundI/O. Rate5 per direct peer and5 per user per minute for bill-download. One job per provider/kind/date/merchant fingerprint; repeats of active/succeeded jobs reuse it and manual_required may reset under fresh current actor/security version. Background worker uses60s token lease,25s operation,5s database finish, fresh signed metadata URL per retry, no externalI/O under financial locks. Gateway/verification/storage/not-ready errors retry30..1800s,8failures or7days thenmanual; parse/profile, unsupported and actor/merchant change become manual immediately. Signed metadata and strict HTTPS origin/path/no redirect constrain downloads. WeChat GZIP original uncompressed bytes must match signed SHA1; Alipay requests secure=true and verifies signed URL but classic results remain partial. Daily schedules may generate the same job identity; an explicit retry of manual_required detaches obsolete schedule authorization. Invalid automatic authorization becomes schedule_changed/manual_required. No raw files or URLs are persisted. Success/import/report/source/job completion commit atomically.",
+        "description": "Admin/finance only; production requires verified email. Rejects query parameters and unknown request fields. No payment, refund, order, entitlement or funds-action state is changed. Requires explicit BILL_DOWNLOADS_ENABLED=true and configured optional BillProvider capability (Alipay/WeChat only, no common Epay protocol). Request performs no outboundI/O. Rate5 per direct peer and5 per user per minute for bill-download. One job per provider/kind/date/merchant fingerprint; repeats of active/succeeded jobs reuse it and manual_required may reset under fresh current actor/security version. Background worker uses60s token lease,25s operation,5s database finish, fresh signed metadata URL per retry, no externalI/O under financial locks. Gateway/verification/storage/not-ready errors retry30..1800s,8failures or7days thenmanual; parse/profile, unsupported and actor/merchant change become manual immediately. Signed metadata and strict HTTPS origin/path/no redirect constrain downloads. WeChat GZIP original uncompressed bytes must match signed SHA1; Alipay requests secure=true and verifies signed URL but classic results remain partial. Daily schedules may generate the same job identity; an explicit retry of manual_required detaches obsolete schedule authorization. Invalid automatic authorization becomes schedule_changed/manual_required. No raw files or URLs are persisted. Success/import/report/source/job completion commit atomically. v0.14 attaches source-bound exact five-decimal fee/channel amount observations atomically with successful native import/download completion; no raw-file persistence. Unknown Alipay cells remain null. WeChat fee/channel summary mismatches create separate warnings without changing canonical gross reports. Existing legacy sources are not guessed/backfilled; explicit same-file native reimport may add the first immutable observation.",
         "responses": {
           "200": {
             "description": "Success (queueing does not mean imported)",
@@ -3973,6 +3973,206 @@
           },
           "default": {
             "description": "400 malformed/unknown/missing fields, invalid provider/kind/time/revision or query;401 unauthenticated;403 role/email/security change;409 stale revision (refresh and retry) or unsupported provider capability;429 shared rate limit;503 global gate disabled for enabling, provider not configured or database unavailable. Sanitized errors never echo credentials, merchant URLs or file contents.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/statements/{id}/sources/{sourceID}/financials": {
+      "get": {
+        "summary": "Staff: raw-source fee and channel amount observations",
+        "operationId": "get_api_v1_admin_statement_source_financials",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; production requires verified email. Rejects all query parameters. Source/report must belong to the complete nested parent chain. Independent of PAYMENT_ACTIONS_ENABLED and BILL_DOWNLOADS_ENABLED. No merchant network request, payment/refund/order/action/entitlement mutation or bank settlement assertion. Returns unavailable explicitly for historical or normalized sources without enrichment, never guessed zero. Native imports/download completion attach snapshot atomically; same-file reimport may add the first snapshot with audit. Different raw fee sources remain distinct despite canonical gross deduplication. WeChat summary differences are finite warnings, not rejection of valid gross import.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed JSON/CSV/unknown fields/query, wrong precision/encoding/size/duplicate identity;401 unauthenticated;403 role/email/session-security change;404 missing or wrong nested source/report ownership;409 no financial snapshot or concurrency conflict;429 peer/user rate limit;503 storage unavailable. Errors never echo uploaded values, merchant URLs or credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/statements/{id}/sources/{sourceID}/financials/reconcile": {
+      "post": {
+        "summary": "Staff: compare explicit expected source fee and channel amounts",
+        "operationId": "post_api_v1_admin_statement_source_financials_reconcile",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.reconcile",
+        "description": "Admin/finance only; production requires verified email. Rejects all query parameters. Source/report must belong to the complete nested parent chain. Independent of PAYMENT_ACTIONS_ENABLED and BILL_DOWNLOADS_ENABLED. No merchant network request, payment/refund/order/action/entitlement mutation or bank settlement assertion. Requires strict single JSON{csv},2MiB body/1MiB UTF8 CSV/2000 rows, explicit signed five-decimal yuan expectations; no fee-rate or net formula. Rate5 per direct peer and5 per user per minute for financial-reconcile. Requires a source financial snapshot, otherwise409. Current session security version is checked under actor lock. Reference digest canonicalizes identity ordering and decimal spellings; same source+digest reuses its immutable report, changed content creates a new revision. Source/reference union includes missing references as unassessed, missing observations or unknown/mismatched amounts as differences; never treats absent expectations as matched. Snapshot/report/audit transaction failures leave no partial evidence.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly equal configured PUBLIC_ORIGIN."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed JSON/CSV/unknown fields/query, wrong precision/encoding/size/duplicate identity;401 unauthenticated;403 role/email/session-security change;404 missing or wrong nested source/report ownership;409 no financial snapshot or concurrency conflict;429 peer/user rate limit;503 storage unavailable. Errors never echo uploaded values, merchant URLs or credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinancialReferenceImport"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/statements/{id}/sources/{sourceID}/financials/runs/{runID}": {
+      "get": {
+        "summary": "Staff: read immutable raw-source financial comparison",
+        "operationId": "get_api_v1_admin_statement_source_financials_run",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "statements.read",
+        "description": "Admin/finance only; production requires verified email. Rejects all query parameters. Source/report must belong to the complete nested parent chain. Independent of PAYMENT_ACTIONS_ENABLED and BILL_DOWNLOADS_ENABLED. No merchant network request, payment/refund/order/action/entitlement mutation or bank settlement assertion. Returns one complete report of at most4000 union rows. Historical reports remain immutable; successful explicit comparison is not confirmation of funds or source completeness.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          },
+          {
+            "name": "sourceID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          },
+          {
+            "name": "runID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hex ID; invalid or incorrectly nested IDs return404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinancialReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed JSON/CSV/unknown fields/query, wrong precision/encoding/size/duplicate identity;401 unauthenticated;403 role/email/session-security change;404 missing or wrong nested source/report ownership;409 no financial snapshot or concurrency conflict;429 peer/user rate limit;503 storage unavailable. Errors never echo uploaded values, merchant URLs or credentials.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7178,6 +7378,487 @@
         "required": [
           "items"
         ]
+      },
+      "FinancialRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "refund_id": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})?$"
+          },
+          "fee_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "channel_amount_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          }
+        },
+        "required": [
+          "payment_id",
+          "refund_id",
+          "fee_yuan",
+          "channel_amount_yuan"
+        ],
+        "description": "A source observation, never authenticated movement of funds. Field meaning depends on snapshot basis; original sign is retained. Alipay blank cells remain null."
+      },
+      "FinancialRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "source_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reference_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA256 of versioned canonical expected rows and kind; ordering/BOM/CSV quoting/equivalent decimal spellings do not create a different reference."
+          },
+          "matched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "unassessed_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "observed_row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "reference_row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "observed_fee_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "observed_channel_amount_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_fee_total_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_channel_amount_total_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "summary_codes": {
+            "type": "array",
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "fee_total_mismatch",
+                "channel_amount_total_mismatch"
+              ]
+            },
+            "description": "Independent source-summary warnings. Row comparisons and canonical gross reports do not suppress these warnings."
+          },
+          "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "revision",
+          "reference_digest",
+          "matched_count",
+          "difference_count",
+          "unassessed_count",
+          "observed_row_count",
+          "reference_row_count",
+          "observed_fee_total_yuan",
+          "observed_channel_amount_total_yuan",
+          "expected_fee_total_yuan",
+          "expected_channel_amount_total_yuan",
+          "summary_codes",
+          "created_by",
+          "created_at"
+        ],
+        "description": "Immutable comparison version for one raw source. matched+difference+unassessed equals report union rows. Missing reference is unassessed; unknown observations cannot match. Source summary warnings are retained independently of row results."
+      },
+      "FinancialSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "",
+              "native-financials-v1"
+            ],
+            "description": "Empty when available=false; otherwise native-financials-v1."
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "",
+              "wechat_settlement_order",
+              "wechat_refund",
+              "alipay_merchant_received"
+            ],
+            "description": "wechat_settlement_order=reported 应结订单金额; wechat_refund=reported 退款金额; alipay_merchant_received=reported 商家实收. None is inferred gross-minus-fee or bank settlement."
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/FinancialRow"
+            }
+          },
+          "fee_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "channel_amount_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "declared_fee_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "declared_channel_amount_total_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most29 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "summary_codes": {
+            "type": "array",
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "fee_total_mismatch",
+                "channel_amount_total_mismatch"
+              ]
+            },
+            "description": "Independent source-summary warnings. Row comparisons and canonical gross reports do not suppress these warnings."
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "source_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "runs": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/FinancialRun"
+            },
+            "description": "Latest20 immutable reference comparisons, descending revision; known older run IDs remain readable."
+          }
+        },
+        "required": [
+          "version",
+          "basis",
+          "rows",
+          "fee_total_yuan",
+          "channel_amount_total_yuan",
+          "declared_fee_total_yuan",
+          "declared_channel_amount_total_yuan",
+          "summary_codes",
+          "available",
+          "source_id",
+          "runs"
+        ],
+        "description": "Source-bound snapshot. Legacy/normalized sources may have available=false: version/basis empty, rows/summary_codes empty and all four totals null. Explicit same-file native reimport can add its first snapshot once, with audit; migration never guesses historical fees. A total is null if any row for that field is unknown, not a misleading partial sum. No raw file, filename, personal product data, download URL or credential is stored here.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "available": {
+                  "const": false
+                }
+              },
+              "required": [
+                "available"
+              ]
+            },
+            "then": {
+              "properties": {
+                "version": {
+                  "const": ""
+                },
+                "basis": {
+                  "const": ""
+                },
+                "rows": {
+                  "maxItems": 0
+                },
+                "summary_codes": {
+                  "maxItems": 0
+                },
+                "fee_total_yuan": {
+                  "type": "null"
+                },
+                "channel_amount_total_yuan": {
+                  "type": "null"
+                },
+                "declared_fee_total_yuan": {
+                  "type": "null"
+                },
+                "declared_channel_amount_total_yuan": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "version": {
+                  "const": "native-financials-v1"
+                },
+                "basis": {
+                  "enum": [
+                    "wechat_settlement_order",
+                    "wechat_refund",
+                    "alipay_merchant_received"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "FinancialComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "refund_id": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})?$"
+          },
+          "observed_fee_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_fee_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "observed_channel_amount_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_channel_amount_yuan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Exact signed decimal yuan string, fixed five fractional places and at most25 integer digits. No floating point, rounding to cents or int64 scaling. Negative zero canonicalizes to0.00000; null means unknown, not zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "difference",
+              "unassessed"
+            ]
+          },
+          "codes": {
+            "type": "array",
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "missing_reference",
+                "missing_observation",
+                "identity_mismatch",
+                "fee_mismatch",
+                "channel_amount_mismatch",
+                "fee_unavailable",
+                "channel_amount_unavailable"
+              ]
+            },
+            "description": "missing_reference gives unassessed; missing_observation, identity_mismatch or amount mismatch/unavailable give difference. An empty code list gives matched only when explicit expectations and both known observations exist."
+          },
+          "expected_payment_id": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})?$",
+            "description": "Payment ID as explicitly supplied in expected CSV. Empty when missing_reference; retained separately so refund identity_mismatch can show both observed payment_id and expected_payment_id."
+          }
+        },
+        "required": [
+          "payment_id",
+          "refund_id",
+          "observed_fee_yuan",
+          "expected_fee_yuan",
+          "observed_channel_amount_yuan",
+          "expected_channel_amount_yuan",
+          "status",
+          "codes",
+          "expected_payment_id"
+        ],
+        "description": "One union identity from source and expected CSV. Payment comparison uses payment_id; refund comparison uses refund_id and additionally checks its payment_id association. Missing side values remain null."
+      },
+      "FinancialReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/FinancialRun"
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 4000,
+            "items": {
+              "$ref": "#/components/schemas/FinancialComparison"
+            },
+            "description": "Entire union of at most2000 observations and2000 references, sorted by identity. UI may paginate locally100 per page; API accepts no paging query."
+          }
+        },
+        "required": [
+          "run",
+          "rows"
+        ],
+        "description": "Immutable observed-versus-explicit-expected report. Reading or comparing never settles a payment, executes a refund, modifies entitlements, or proves bank funds arrived."
+      },
+      "FinancialReferenceImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "csv": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576,
+            "description": "UTF8 CSV at most1MiB and2000 rows; optional BOM. Exact header payment_id,refund_id,expected_fee_yuan,expected_channel_amount_yuan. Both expected signed yuan amounts are required,25 integer digits/five fractional digits maximum, no exponent/plus/whitespace/leading zeros; negative zero canonicalizes to zero. Payment rows require empty refund_id and unique payment_id; refund rows require valid unique refund_id and associated payment_id. Header-only is valid, making all source records unassessed. Raw CSV is parsed and not persisted as a file."
+          }
+        },
+        "required": [
+          "csv"
+        ],
+        "description": "Strict single JSON body, at most2MiB including JSON escaping. Unknown/missing fields rejected; expectation is explicitly supplied by staff, never guessed from gross, rate or source values."
       }
     }
   },

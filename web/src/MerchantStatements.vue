@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NInput, NModal, NTag } from 'naive-ui'
 import { api, type BillDownloadJob, type PaymentMethod, type StatementDetail, type StatementFinding, type StatementFindingsPage, type StatementReview, type StatementRun, type StatementSummary } from './api'
 import BillSchedules from './BillSchedules.vue'
+import StatementFinancials from './StatementFinancials.vue'
 
 const props = defineProps<{ canImport: boolean; canReconcile: boolean; canReview: boolean; canDownload: boolean; canSchedule: boolean; billDownloadsEnabled: boolean }>()
 const statements = ref<StatementSummary[]>([]), detail = ref<StatementDetail | null>(null), run = ref<StatementRun | null>(null)
@@ -315,6 +316,7 @@ onBeforeUnmount(() => { alive = false; clearImport(); clearNative(); clearReview
   <p v-else class="muted">{{ findings.total ? '此页暂无差异，请返回上一页或更改筛选。' : reviewFilter === 'all' ? '本次导入记录未发现差异。此结果仅针对已保存的账单和查询快照。' : '暂无符合复核状态的差异。' }}</p>
   <div class="statement-pagination"><span class="muted">第 {{ visibleStart }}–{{ visibleEnd }} 项，共 {{ findings.total }} 项</span><div class="statement-actions"><NButton size="small" :disabled="busy || findings.offset === 0" @click="changePage(Math.max(0, findings.offset - findings.limit))">上一页差异</NButton><NButton size="small" :disabled="busy || findings.offset + findings.limit >= findings.total" @click="changePage(findings.offset + findings.limit)">下一页差异</NButton></div></div>
   <details class="statement-source"><summary>查看账单来源标识</summary><p class="statement-reference">账单 {{ detail.statement.id }}</p><p class="statement-reference">内容摘要 {{ detail.statement.digest }}</p><p class="muted">导入时间 {{ time(detail.statement.created_at) }} · 内容相同的账单重复导入会复用原记录。</p><ul v-if="detail.sources?.length" class="statement-source-list"><li v-for="source in detail.sources" :key="source.id" :data-source-id="source.id"><strong>{{ sourceFormat(source.format) }}</strong><p>{{ source.kind === 'download' ? '渠道下载' : '手动上传' }} · {{ sourceIntegrity(source.integrity) }}</p><p class="statement-reference">来源摘要 {{ source.digest }}</p><small>{{ time(source.created_at) }}<template v-if="source.download_job_id"> · 下载任务 {{ source.download_job_id.slice(0, 12) }}</template></small></li></ul><p v-else class="muted">此账单暂无可展示的新增来源记录。</p><p class="muted">来源记录只保存格式、摘要与处理方式，不保存原始文件、签名下载地址或令牌；来源校验不表示收款或退款已确认。</p></details>
+  <StatementFinancials :key="detail.statement.id" :statement-id="detail.statement.id" :sources="detail.sources || []" :can-reconcile="canReconcile" />
  </section>
 
  <NModal v-model:show="nativeOpen" preset="card" title="导入原始账单" style="width: 700px; max-width: calc(100vw - 32px)">

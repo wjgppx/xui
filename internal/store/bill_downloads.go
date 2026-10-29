@@ -27,6 +27,7 @@ type StatementSource struct {
 type statementSourceInput struct {
 	Format, Kind, Digest, Integrity, MerchantFingerprint string
 	DownloadJobID                                        *string
+	Financials                                           *statements.FinancialDocument
 }
 
 const statementSourceColumns = `id,statement_id,source_format,source_kind,digest,integrity,merchant_fingerprint,download_job_id,imported_by,created_at`
@@ -71,7 +72,25 @@ func addStatementSource(ctx context.Context, tx pgx.Tx, actor, statementID strin
 		return false, ErrStatementConflict
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO merchant_statement_sources(id,statement_id,source_format,source_kind,digest,integrity,merchant_fingerprint,download_job_id,imported_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(statement_id,source_format,source_kind,digest,merchant_fingerprint) DO NOTHING`, ID(), statementID, input.Format, input.Kind, input.Digest, input.Integrity, input.MerchantFingerprint, input.DownloadJobID, actor)
-	return tag.RowsAffected() == 1, err
+	if err != nil {
+		return false, err
+	}
+	if input.Financials != nil {
+		if input.Format == "normalized_csv_v1" {
+			return false, ErrStatementConflict
+		}
+		var sourceID string
+		if err = tx.QueryRow(ctx, `SELECT id FROM merchant_statement_sources WHERE statement_id=$1 AND source_format=$2 AND source_kind=$3 AND digest=$4 AND merchant_fingerprint=$5`, statementID, input.Format, input.Kind, input.Digest, input.MerchantFingerprint).Scan(&sourceID); err != nil {
+			return false, err
+		}
+		// The raw source is the financial scope, even when its gross facts reuse
+		// an existing statement. An old source may gain its first snapshot only
+		// through an explicit re-import; existing snapshots remain immutable.
+		if err = addFinancialSnapshot(ctx, tx, actor, sourceID, *input.Financials); err != nil {
+			return false, err
+		}
+	}
+	return tag.RowsAffected() == 1, nil
 }
 func (s *Store) ImportNativeStatement(ctx context.Context, actor string, input statements.NativeImport) (StatementDetail, error) {
 	result, err := statements.ParseNative(input)
@@ -90,7 +109,7 @@ func (s *Store) ImportNativeStatement(ctx context.Context, actor string, input s
 	if err = actionActor(ctx, tx, actor, -1, false); err != nil {
 		return StatementDetail{}, statementError(err)
 	}
-	detail, err := importStatementDocument(ctx, tx, actor, document, statementSourceInput{Format: result.Format, Kind: "upload", Digest: result.SourceDigest, Integrity: "unverified_upload"})
+	detail, err := importStatementDocument(ctx, tx, actor, document, statementSourceInput{Format: result.Format, Kind: "upload", Digest: result.SourceDigest, Integrity: "unverified_upload", Financials: result.Financials})
 	if err != nil {
 		return detail, statementError(err)
 	}
@@ -354,7 +373,7 @@ func (s *Store) CompleteBillDownload(ctx context.Context, id, token string, resu
 		}
 		integrity = "wechat_signed_sha1"
 	}
-	detail, err := importStatementDocument(ctx, tx, actor, document, statementSourceInput{Format: result.Format, Kind: "download", Digest: result.SourceDigest, Integrity: integrity, MerchantFingerprint: fingerprint, DownloadJobID: &id})
+	detail, err := importStatementDocument(ctx, tx, actor, document, statementSourceInput{Format: result.Format, Kind: "download", Digest: result.SourceDigest, Integrity: integrity, MerchantFingerprint: fingerprint, DownloadJobID: &id, Financials: result.Financials})
 	if err != nil {
 		return detail, statementError(err)
 	}

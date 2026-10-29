@@ -41,6 +41,7 @@ type NativeResult struct {
 	SourceDigest string
 	Format       string
 	MerchantID   string
+	Financials   *FinancialDocument
 }
 
 var wechatSuccessHeader = strings.Split("交易时间,公众账号ID,商户号,特约商户号,设备号,微信订单号,商户订单号,用户标识,交易类型,交易状态,付款银行,货币种类,应结订单金额,代金券金额,商品名称,商户数据包,手续费,费率,订单金额,费率备注", ",")
@@ -119,11 +120,16 @@ func ConvertNative(provider, kind, date, coverage, format string, data []byte, e
 		return NativeResult{}, invalid(0, "format", "invalid_native_record")
 	}
 	input.CSV = output.String()
-	if _, err = Parse(input); err != nil {
+	document, err := Parse(input)
+	if err != nil {
+		return NativeResult{}, err
+	}
+	financials, err := extractNativeFinancials(document, format, data)
+	if err != nil {
 		return NativeResult{}, err
 	}
 	digest := sha256.Sum256(data)
-	return NativeResult{Input: input, SourceDigest: hex.EncodeToString(digest[:]), Format: format, MerchantID: merchant}, nil
+	return NativeResult{Input: input, SourceDigest: hex.EncodeToString(digest[:]), Format: format, MerchantID: merchant, Financials: financials}, nil
 }
 
 func nativeHeader(values, expected []string) bool {
