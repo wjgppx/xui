@@ -55,6 +55,9 @@ var billSchedulesSchema string
 //go:embed statement_financials.sql
 var statementFinancialsSchema string
 
+//go:embed fund_ledgers.sql
+var fundLedgersSchema string
+
 var ErrNotFound = errors.New("not found")
 var ErrPaymentConflict = errors.New("payment conflicts with order")
 
@@ -126,7 +129,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema, merchantStatementsSchema, billDownloadsSchema, billSchedulesSchema, statementFinancialsSchema} {
+	for i, migration := range []string{schema, nodeSchema, proxySchema, usageSchema, subscriptionSchema, groupSchema, securitySchema, paymentSchema, paymentLifecycleSchema, paymentActionsSchema, merchantStatementsSchema, billDownloadsSchema, billSchedulesSchema, statementFinancialsSchema, fundLedgersSchema} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err

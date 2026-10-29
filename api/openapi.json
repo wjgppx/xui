@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "XUI platform and node API",
-    "version": "0.14.0",
-    "description": "Independent subscription platform with verified payment adapters and read-only statement discrepancy reports. Adds source-bound immutable native fee/channel amount observations with exact five-decimal yuan strings and explicit reference-CSV comparisons. Different raw sources sharing canonical gross facts retain separate financial observations; missing historical fields remain unavailable until explicit same-file reimport. No fee-rate/net-amount guessing, bank settlement confirmation, payment/refund execution or entitlement change. Daily downloads remain opt-in; full fund-flow/balance reconciliation and real merchant acceptance remain pending."
+    "version": "0.15.0",
+    "description": "Independent subscription platform with verified payment adapters and read-only financial observations. Adds immutable manually normalized merchant/bank fund-flow batches, fixed account-alias provider scopes, exact five-decimal yuan balance continuity checks, and explicit withdrawal/bank-record comparisons by account pair and transfer reference. Balance discrepancies and partial-source warnings remain visible; duplicate transfer references are ambiguous and overlapping batches are never accumulated as a current balance. This increment does not connect to a bank, download official fund-flow files, create withdrawals, confirm actual arrival, settle payments/refunds or change entitlements. Official profiles/downloads and real merchant/bank acceptance remain pending."
   },
   "paths": {
     "/healthz": {
@@ -4183,6 +4183,278 @@
           }
         }
       }
+    },
+    "/api/v1/admin/fund-ledgers": {
+      "get": {
+        "summary": "Staff: list latest100 independent fund-flow batches",
+        "operationId": "get_api_v1_admin_fund-ledgers",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.read",
+        "description": "Staff: list latest100 independent fund-flow batches. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundLedgerList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Staff: import normalized manual fund-flow observations",
+        "operationId": "post_api_v1_admin_fund-ledgers",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.import",
+        "description": "Staff: import normalized manual fund-flow observations. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival. Strict single JSON max2MiB, CSV1MiB/2000rows. Exact five-decimal yuan, preserved physical sequence, signed balance observations and positive credit/debit movements. Structural errors reject whole file, arithmetic discrepancies persist. Actor role/security version, first alias provider/CNY pin, canonical batch and audit commit atomically. Semantic repeats reuse existing batch, no duplicate audit. Rate5 per direct peer and5 per user per minute for fund-ledger-import.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundLedger"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundLedgerImport"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly match configured PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/fund-ledgers/{id}": {
+      "get": {
+        "summary": "Staff: read an immutable fund-flow batch and balance checks",
+        "operationId": "get_api_v1_admin_fund-ledgers_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.read",
+        "description": "Staff: read an immutable fund-flow batch and balance checks. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival. Returns up to2000 normalized rows; no current or cross-batch accumulated balance.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundLedger"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID. Malformed400; valid missingID404."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/fund-reconciliations": {
+      "get": {
+        "summary": "Staff: list latest100 immutable merchant-bank comparisons",
+        "operationId": "get_api_v1_admin_fund-reconciliations",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.read",
+        "description": "Staff: list latest100 immutable merchant-bank comparisons. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundReconciliationList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Staff: compare explicitly selected merchant and bank batch scopes",
+        "operationId": "post_api_v1_admin_fund-reconciliations",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.reconcile",
+        "description": "Staff: compare explicitly selected merchant and bank batch scopes. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival. Strict pair IDs, max2MiB single JSON, Origin and current actor/session security version required. Bind account aliases and counterpart aliases, compare exact transfer references and amounts, allow cross-day dates. Duplicate references ambiguous; no fuzzy amount/time matching or fee deduction. Source partial/balance warnings, out-of-scope and other counts remain explicit. Pair+algorithmversion is idempotent; report and audit commit atomically. Rate5 per direct peer and5 per user per minute for fund-ledger-reconcile.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundReconciliation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundReconciliationCreate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must exactly match configured PUBLIC_ORIGIN."
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/fund-reconciliations/{id}": {
+      "get": {
+        "summary": "Staff: read immutable merchant-bank reference comparison",
+        "operationId": "get_api_v1_admin_fund-reconciliations_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-required-permission": "funds.read",
+        "description": "Staff: read immutable merchant-bank reference comparison. Admin/finance only, verified email required in production. Rejects all query parameters, including bare question mark. Independent of payment-action/download gates. No outbound merchant/bank I/O, actual withdrawal/payment/refund or entitlement changes, or assertion of current bank balance/confirmed arrival. Returns entire reference union of at most4000 groups, retaining all duplicate candidates. Matching is unverified observation equivalence; missing means selected scope unlisted, potentially cross-day.",
+        "responses": {
+          "200": {
+            "description": "Saved/reused immutable observations; not confirmed money movement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundReconciliation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "400 malformed/missing/unknown JSON or CSV fields, bad encoding/precision/order/IDs/query;401 unauthenticated;403 role/email/session-security change;404 missing valid batch/report;409 pinned account/provider conflict, incompatible pair or concurrency conflict;429 independent peer/user purpose limits;503 storage unavailable. Sanitized finite errors never echo imported values, credentials or URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "description": "Internal32hexID. Malformed400; valid missingID404."
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -7859,6 +8131,829 @@
           "csv"
         ],
         "description": "Strict single JSON body, at most2MiB including JSON escaping. Unknown/missing fields rejected; expectation is explicitly supplied by staff, never guessed from gross, rate or source values."
+      },
+      "FundLedgerEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "entry_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Normalized UTC microsecond precision; input must fall within selected Shanghai day and be nondecreasing in original sequence."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund",
+              "fee",
+              "withdrawal",
+              "deposit",
+              "settlement",
+              "adjustment",
+              "other"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "credit",
+              "debit"
+            ]
+          },
+          "amount_yuan": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Strictly positive movement; credit/debit expresses the sign.",
+            "not": {
+              "const": "0.00000"
+            }
+          },
+          "balance_after_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "step_expected_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "transfer_id": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})?$"
+          },
+          "counterparty_account_key": {
+            "type": "string",
+            "pattern": "^([a-z][a-z0-9_-]{0,63})?$"
+          },
+          "codes": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "enum": [
+                "running_balance_mismatch",
+                "step_balance_mismatch"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "sequence",
+          "entry_id",
+          "occurred_at",
+          "kind",
+          "direction",
+          "amount_yuan",
+          "balance_after_yuan",
+          "expected_balance_yuan",
+          "step_expected_balance_yuan",
+          "transfer_id",
+          "counterparty_account_key",
+          "codes"
+        ],
+        "description": "Immutable normalized observation preserving physical sequence. Merchant withdrawal/debit and bank settlement/credit require transfer_id and a different counterparty alias; all other rows require both fields empty. Running expected balance starts from opening and all signed amounts; step expected balance uses the previous reported balance. Arithmetic discrepancies are retained as finite codes."
+      },
+      "FundLedgerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "fund-ledger-v1"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "bank"
+            ]
+          },
+          "account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$"
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "Staff scope declaration, not authenticated completeness. Full coverage and arithmetic consistency never prove a current balance or bank arrival."
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA256 of versioned canonical scope, metadata and ordered normalized observations; raw files/filenames are not persisted."
+          },
+          "opening_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "closing_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_closing_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "total_credit_yuan": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "total_debit_yuan": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "balance_difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "summary_codes": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "enum": [
+                "closing_balance_mismatch",
+                "closing_entry_mismatch"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "imported_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "version",
+          "provider",
+          "account_key",
+          "date",
+          "coverage",
+          "currency",
+          "digest",
+          "opening_balance_yuan",
+          "closing_balance_yuan",
+          "expected_closing_balance_yuan",
+          "total_credit_yuan",
+          "total_debit_yuan",
+          "row_count",
+          "balance_difference_count",
+          "summary_codes",
+          "id",
+          "imported_by",
+          "created_at"
+        ],
+        "description": "One immutable manual observation batch, never an accumulated/current account balance. balance_difference_count counts rows with at least one row code, not total codes. Summary codes independently retain closing discrepancies. Overlapping/corrected batches remain independent."
+      },
+      "FundLedger": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "fund-ledger-v1"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "bank"
+            ]
+          },
+          "account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$"
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "Staff scope declaration, not authenticated completeness. Full coverage and arithmetic consistency never prove a current balance or bank arrival."
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA256 of versioned canonical scope, metadata and ordered normalized observations; raw files/filenames are not persisted."
+          },
+          "opening_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "closing_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most25 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "expected_closing_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "total_credit_yuan": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "total_debit_yuan": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,28})\\.[0-9]{5}$",
+            "description": "Canonical exact yuan string, fixed five fractional places and at most29 integer digits. Signed balances may be negative; negative zero is normalized to zero.",
+            "not": {
+              "const": "-0.00000"
+            }
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "balance_difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "summary_codes": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "enum": [
+                "closing_balance_mismatch",
+                "closing_entry_mismatch"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "imported_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/FundLedgerEntry"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "provider",
+          "account_key",
+          "date",
+          "coverage",
+          "currency",
+          "digest",
+          "opening_balance_yuan",
+          "closing_balance_yuan",
+          "expected_closing_balance_yuan",
+          "total_credit_yuan",
+          "total_debit_yuan",
+          "row_count",
+          "balance_difference_count",
+          "summary_codes",
+          "id",
+          "imported_by",
+          "created_at",
+          "rows"
+        ],
+        "description": "Full immutable batch with exact observations and balance checks. Matching metadata/content reuses its existing ID; corrections create a different batch. Empty rows are allowed, with closing mismatch retained if opening differs from closing."
+      },
+      "FundLedgerImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "alipay",
+              "wechat",
+              "bank"
+            ]
+          },
+          "account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$"
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "partial",
+              "full"
+            ],
+            "description": "Staff scope declaration, not authenticated completeness. Full coverage and arithmetic consistency never prove a current balance or bank arrival."
+          },
+          "opening_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})(?:\\.[0-9]{1,5})?$",
+            "description": "Exact yuan string, at most25 integer digits and five fractional digits; input never rounds or uses floating point. Signed balances may be negative; negative zero is normalized to zero."
+          },
+          "closing_balance_yuan": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]{0,24})(?:\\.[0-9]{1,5})?$",
+            "description": "Exact yuan string, at most25 integer digits and five fractional digits; input never rounds or uses floating point. Signed balances may be negative; negative zero is normalized to zero."
+          },
+          "csv": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576,
+            "description": "UTF8 at most1MiB/2000 records, optional BOM. Exact header sequence,entry_id,occurred_at,kind,direction,amount_yuan,balance_after_yuan,transfer_id,counterparty_account_key. Sequence is physical1..N with nondecreasing timezone-qualified timestamps in selected Shanghai day, no implicit reordering. Entry IDs unique; transfer reference duplicates retained for ambiguity reports. Movement amounts strictly positive, balances signed, all at most25 integer/five fractional digits. Merchant supports payment-credit/refund-debit/withdrawal-debit/deposit-credit, bank settlement-credit/withdrawal-debit/deposit-credit, both support fee/adjustment/other either direction. Merchant settlement and bank payment/refund are rejected. Only merchantwithdrawal/banksettlement require transfer_id/counterparty; all other rows require empty values."
+          }
+        },
+        "required": [
+          "provider",
+          "account_key",
+          "date",
+          "coverage",
+          "opening_balance_yuan",
+          "closing_balance_yuan",
+          "csv"
+        ],
+        "description": "Strict single JSON request, max2MiB including escaping. CNY fixed and no supplied currency/owner/status/URL. First alias import pins provider/CNY; changing provider returns409. Partial is recommended; full is an operator declaration. Structural errors reject whole import, arithmetic balance differences are saved as observations with finite warnings."
+      },
+      "FundLedgerList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/FundLedgerSummary"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "description": "Latest100 batches, descending import time/ID, metadata only. Known older IDs remain readable. No query parameters."
+      },
+      "FundTransferComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "transfer_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "merchant_entries": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/FundLedgerEntry"
+            }
+          },
+          "bank_entries": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/FundLedgerEntry"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "difference",
+              "unmatched",
+              "ambiguous"
+            ]
+          },
+          "codes": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": [
+                "amount_mismatch",
+                "duplicate_transfer_id",
+                "bank_record_missing",
+                "merchant_record_missing"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "transfer_id",
+          "merchant_entries",
+          "bank_entries",
+          "status",
+          "codes"
+        ],
+        "description": "One transfer-reference group within explicitly selected accounts. All candidates are retained. Exactly one per side and equal amount is an observation match; duplicates on either side are ambiguous, never selected or summed. Missing bank record means absent in the chosen scope, not confirmed non-arrival. No date-window/amount-only matching or assumed fee subtraction."
+      },
+      "FundReconciliationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "merchant_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "bank_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "string",
+            "const": "fund-transfer-comparison-v1"
+          },
+          "merchant_account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "bank_account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "matched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "unmatched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "ambiguous_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "merchant_candidate_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_candidate_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "merchant_out_of_scope_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_out_of_scope_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "merchant_other_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_other_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "source_warnings": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": [
+                "merchant_partial",
+                "bank_partial",
+                "merchant_balance_issues",
+                "bank_balance_issues"
+              ]
+            },
+            "uniqueItems": true,
+            "description": "Independent source scope/arithmetic warnings. Matching rows or zero candidates never suppress them or prove confirmed arrival."
+          }
+        },
+        "required": [
+          "id",
+          "merchant_batch_id",
+          "bank_batch_id",
+          "created_by",
+          "created_at",
+          "version",
+          "merchant_account_key",
+          "bank_account_key",
+          "matched_count",
+          "difference_count",
+          "unmatched_count",
+          "ambiguous_count",
+          "merchant_candidate_count",
+          "bank_candidate_count",
+          "merchant_out_of_scope_count",
+          "bank_out_of_scope_count",
+          "merchant_other_count",
+          "bank_other_count",
+          "source_warnings"
+        ],
+        "description": "Immutable non-consuming observation comparison, explicitly binding a merchant batch and bank batch with different aliases. Cross-day batches are allowed. Candidate and out-of-scope counts do not include other movements. matched+difference+unmatched+ambiguous counts groups; candidate counts count individual entries. Same batch pair/version reuses existing report."
+      },
+      "FundReconciliation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "merchant_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "bank_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_by": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "string",
+            "const": "fund-transfer-comparison-v1"
+          },
+          "merchant_account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "bank_account_key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "description": "Operator-declared internal alias, globally pinned to its first provider/CNY; do not use account credentials or a bank-card number."
+          },
+          "matched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "difference_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "unmatched_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "ambiguous_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          "merchant_candidate_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_candidate_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "merchant_out_of_scope_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_out_of_scope_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "merchant_other_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "bank_other_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000
+          },
+          "source_warnings": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": [
+                "merchant_partial",
+                "bank_partial",
+                "merchant_balance_issues",
+                "bank_balance_issues"
+              ]
+            },
+            "uniqueItems": true,
+            "description": "Independent source scope/arithmetic warnings. Matching rows or zero candidates never suppress them or prove confirmed arrival."
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 4000,
+            "items": {
+              "$ref": "#/components/schemas/FundTransferComparison"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "merchant_batch_id",
+          "bank_batch_id",
+          "created_by",
+          "created_at",
+          "version",
+          "merchant_account_key",
+          "bank_account_key",
+          "matched_count",
+          "difference_count",
+          "unmatched_count",
+          "ambiguous_count",
+          "merchant_candidate_count",
+          "bank_candidate_count",
+          "merchant_out_of_scope_count",
+          "bank_out_of_scope_count",
+          "merchant_other_count",
+          "bank_other_count",
+          "source_warnings",
+          "rows"
+        ],
+        "description": "Entire bounded reference union, sorted by transfer_id. UI paginates locally100 groups/page. Only merchantwithdrawal to the selected bank and banksettlement from the selected merchant are in scope; other aliases are counted outside scope. Reports do not consume observations, globally mark funds settled, aggregate balances, or change payments/refunds/orders/entitlements."
+      },
+      "FundReconciliationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/FundReconciliationSummary"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "description": "Latest100 immutable report metadata; known older report IDs remain readable. No query parameters."
+      },
+      "FundReconciliationCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "merchant_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "bank_batch_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "merchant_batch_id",
+          "bank_batch_id"
+        ],
+        "description": "Explicit immutable batch pair only; merchant provider must be alipay/wechat, bank provider bank and account aliases differ. Wrong pair409; no supplied account overrides, transfer status, amounts, credentials or bank URLs."
       }
     }
   },
@@ -7882,7 +8977,10 @@
       "statements.reconcile",
       "statements.review",
       "statements.download",
-      "statements.schedule"
+      "statements.schedule",
+      "funds.read",
+      "funds.import",
+      "funds.reconcile"
     ],
     "operator": [
       "nodes.read",
@@ -7916,7 +9014,10 @@
       "statements.reconcile",
       "statements.review",
       "statements.download",
-      "statements.schedule"
+      "statements.schedule",
+      "funds.read",
+      "funds.import",
+      "funds.reconcile"
     ]
   }
 }

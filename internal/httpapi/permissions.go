@@ -6,9 +6,9 @@ import (
 )
 
 var rolePermissions = map[string][]string{
-	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule"},
+	"admin":    {"overview.read", "orders.read", "plans.write", "nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry", "entitlements.revoke", "users.read", "users.roles", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "refunds.approve", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule", "funds.read", "funds.import", "funds.reconcile"},
 	"support":  {"orders.read", "users.read"},
-	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule"},
+	"finance":  {"overview.read", "orders.read", "plans.write", "payments.read", "payments.retry", "payments.close", "refunds.read", "refunds.request", "statements.read", "statements.import", "statements.reconcile", "statements.review", "statements.download", "statements.schedule", "funds.read", "funds.import", "funds.reconcile"},
 	"operator": {"nodes.read", "nodes.write", "access.read", "access.write", "events.read", "events.retry"},
 	"user":     {},
 }
@@ -25,6 +25,27 @@ func permitted(role, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/admin/fund-ledgers":
+		if r.Method == "GET" {
+			return "funds.read"
+		}
+		if r.Method == "POST" {
+			return "funds.import"
+		}
+		return "unmapped.deny"
+	case p == "/api/v1/admin/fund-reconciliations":
+		if r.Method == "GET" {
+			return "funds.read"
+		}
+		if r.Method == "POST" {
+			return "funds.reconcile"
+		}
+		return "unmapped.deny"
+	case strings.HasPrefix(p, "/api/v1/admin/fund-ledgers/"), strings.HasPrefix(p, "/api/v1/admin/fund-reconciliations/"):
+		if r.Method == "GET" {
+			return "funds.read"
+		}
+		return "unmapped.deny"
 	case p == "/api/v1/admin/bill-schedules":
 		if r.Method == "GET" {
 			return "statements.read"
