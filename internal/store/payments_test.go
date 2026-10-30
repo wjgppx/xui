@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wjgppx/xui/internal/store"
 	"github.com/wjgppx/xui/internal/testutil"
 )
@@ -24,6 +26,59 @@ func paymentFixture(t *testing.T, s *store.Store, provider string) (string, stor
 		t.Fatal(err)
 	}
 	return user, o, p
+}
+
+func TestPaymentSettlementPreservesTransientUserLockErrors(t *testing.T) {
+	s := testutil.Database(t)
+	ctx := context.Background()
+	user, order, payment := paymentFixture(t, s, "alipay")
+	blocker, err := s.DB.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(ctx)
+	if _, err = blocker.Exec(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, user); err != nil {
+		t.Fatal(err)
+	}
+	// A server-side lock timeout proves the settlement reached the user lock;
+	// a client deadline alone could instead expire before acquiring a connection.
+	config := s.DB.Config()
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "100ms"
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal("isolated lock-timeout pool unavailable")
+	}
+	defer pool.Close()
+	timed := &store.Store{DB: pool}
+	for _, test := range []struct {
+		name   string
+		settle func() error
+	}{
+		{"development", func() error {
+			return timed.Settle(ctx, "development", "lock-timeout", order.ID, user, order.Price, order.Currency)
+		}},
+		{"verified-intent", func() error {
+			return timed.SettlePayment(ctx, payment.ID, payment.Provider, "lock-timeout", order.Price, order.Currency)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.settle()
+			var failure *pgconn.PgError
+			if errors.Is(err, store.ErrNotFound) || !errors.As(err, &failure) || failure.Code != "55P03" {
+				t.Fatal("transient database lock failure was hidden as a missing payment or order")
+			}
+		})
+	}
+	var status string
+	if err = s.DB.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, order.ID).Scan(&status); err != nil || status != "pending" {
+		t.Fatal("failed settlement changed the order")
+	}
+	for _, table := range []string{"payment_events", "outbox_events", "entitlement_periods"} {
+		var count int
+		if err = s.DB.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+			t.Fatal("failed settlement partially committed financial state", table)
+		}
+	}
 }
 
 func TestPaymentIntentConcurrentCreationPinsProviderAndOwner(t *testing.T) {

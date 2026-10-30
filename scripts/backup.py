@@ -24,7 +24,12 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SNAPSHOT = re.compile(r"^[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9A-Fa-f]+$")
-FORMAT = "xui-postgres-backup-v1"
+FORMAT = "xui-postgres-backup-v2"
+LEGACY_FORMAT = "xui-postgres-backup-v1"
+FINGERPRINT_ALGORITHM = "sorted-sha256-rows-v2"
+FINGERPRINT_BATCH_ROWS = 4096
+FINGERPRINT_END = "xui_fingerprint_batch_end"
+ROW_FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 MAX_MANIFEST_BYTES = 4 << 20
 
 
@@ -138,7 +143,7 @@ class SnapshotSession:
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, cwd=ROOT)
         try:
-            self.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TIME ZONE 'UTC'; SELECT 1;")
+            self.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET TIME ZONE 'UTC'; SET LOCAL work_mem='4MB'; SET LOCAL max_parallel_workers_per_gather=0; SELECT 1;")
         except Exception:
             self.close()
             raise
@@ -148,12 +153,46 @@ class SnapshotSession:
         try:
             self.process.stdin.write(statement + "\n")
             self.process.stdin.flush()
-            line = self.process.stdout.readline()
+            line = self.process.stdout.readline(MAX_MANIFEST_BYTES + 2)
         except OSError:
             raise BackupError("snapshot_query_failed") from None
-        if not line:
+        if not line or not line.endswith("\n") or len(line) > MAX_MANIFEST_BYTES + 1:
             raise BackupError("snapshot_query_failed")
         return line.rstrip("\n")
+
+    def row_fingerprint(self, table: str) -> str:
+        # Keep one exported transaction/snapshot. PostgreSQL sorts fixed-size
+        # row digests with bounded work_mem (spilling to temporary disk); it
+        # never materializes an entire table into a single text value. FETCH
+        # bounds each batch while Python hashes one digest at a time.
+        self.query("DECLARE xui_fingerprint NO SCROLL CURSOR FOR SELECT fingerprint FROM "
+                   "(SELECT encode(sha256(convert_to(to_jsonb(r)::text,'UTF8')),'hex') AS fingerprint "
+                   "FROM " + table + " r) leaf_rows ORDER BY fingerprint COLLATE \"C\"; SELECT 1;")
+        digest = hashlib.sha256((FINGERPRINT_ALGORITHM + "\n").encode("ascii"))
+        assert self.process.stdin is not None and self.process.stdout is not None
+        while True:
+            try:
+                self.process.stdin.write("FETCH FORWARD " + str(FINGERPRINT_BATCH_ROWS)
+                                         + " FROM xui_fingerprint; SELECT '" + FINGERPRINT_END + "';\n")
+                self.process.stdin.flush()
+                count = 0
+                while True:
+                    line = self.process.stdout.readline(128)
+                    if not line or not line.endswith("\n"):
+                        raise BackupError("snapshot_fingerprint_failed")
+                    value = line[:-1]
+                    if value == FINGERPRINT_END:
+                        break
+                    if not ROW_FINGERPRINT.fullmatch(value) or count >= FINGERPRINT_BATCH_ROWS:
+                        raise BackupError("snapshot_fingerprint_failed")
+                    digest.update((value + "\n").encode("ascii"))
+                    count += 1
+            except OSError:
+                raise BackupError("snapshot_fingerprint_failed") from None
+            if count < FINGERPRINT_BATCH_ROWS:
+                break
+        self.query("CLOSE xui_fingerprint; SELECT 1;")
+        return digest.hexdigest()
 
     def json(self, statement: str):
         try:
@@ -194,7 +233,7 @@ def snapshot_evidence(session: SnapshotSession) -> dict:
                     "orders", "payment_events", "payment_intents", "payment_refunds",
                     "entitlement_periods", "usage_batches", "usage_items", "merchant_statements",
                     "merchant_statement_financials", "fund_ledger_batches", "fund_ledger_reconciliations"}:
-            financial[key] = session.query("SELECT md5(COALESCE(string_agg(md5(to_jsonb(r)::text),'' ORDER BY md5(to_jsonb(r)::text)),'')) FROM " + table + " r;")
+            financial[key] = session.row_fingerprint(table)
     objects = session.json("""SELECT json_build_object(
       'constraints',COALESCE((SELECT json_agg(json_build_array(n.nspname,c.relname,k.conname,k.contype,pg_get_constraintdef(k.oid)) ORDER BY n.nspname,c.relname,k.conname) FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'),'[]'::json),
       'indexes',COALESCE((SELECT json_agg(json_build_array(schemaname,tablename,indexname,indexdef) ORDER BY schemaname,tablename,indexname) FROM pg_indexes WHERE schemaname !~ '^pg_' AND schemaname<>'information_schema'),'[]'::json),
@@ -209,7 +248,8 @@ def snapshot_evidence(session: SnapshotSession) -> dict:
             for field in aggregate_fields[name]:
                 if field in available:
                     sums[schema + "." + name + "." + field] = session.query("SELECT COALESCE(sum(" + identifier(field) + "),0)::text FROM " + identifier(schema) + "." + identifier(name) + ";")
-    return {"table_counts": counts, "financial_fingerprints": financial, "critical_sums": sums, **objects}
+    return {"fingerprint_algorithm": FINGERPRINT_ALGORITHM, "table_counts": counts,
+            "financial_fingerprints": financial, "critical_sums": sums, **objects}
 
 
 def archive_digest(stream) -> tuple[str, int]:
@@ -234,7 +274,9 @@ def verify(archive: Path) -> dict:
         manifest = json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         raise BackupError("invalid_manifest") from None
-    if not isinstance(manifest, dict) or manifest.get("format") != FORMAT or manifest.get("archive_name") != archive.name or not isinstance(manifest.get("evidence"), dict):
+    if not isinstance(manifest, dict) or manifest.get("format") not in (FORMAT, LEGACY_FORMAT) or manifest.get("archive_name") != archive.name or not isinstance(manifest.get("evidence"), dict):
+        raise BackupError("invalid_manifest")
+    if manifest["format"] == FORMAT and manifest["evidence"].get("fingerprint_algorithm") != FINGERPRINT_ALGORITHM:
         raise BackupError("invalid_manifest")
     with private_file(archive) as stream:
         if stream.read(5) != b"PGDMP":
@@ -312,6 +354,8 @@ def backup(backend: Backend, database: str, archive: Path) -> dict:
 def restore(backend: Backend, archive: Path, target: str, keep: bool) -> dict:
     target = database_name(target)
     manifest = verify(archive)
+    if manifest["format"] != FORMAT:
+        raise BackupError("legacy_backup_restore_requires_v1_tool")
     # Verify the native archive directory before creating any target database.
     with private_file(archive) as stream:
         backend.run("pg_restore", "--list", stdin=stream)
@@ -358,6 +402,9 @@ INSERT INTO staff_mfa(user_id,secret_cipher,enabled_at,last_counter) VALUES('bac
 INSERT INTO staff_mfa_recovery(user_id,code_hash,used_at) VALUES('backup-user',repeat('b',64),now());
 INSERT INTO plans(id,name,description,price_minor,currency,duration_days,quota_bytes) VALUES('backup-plan','Backup fixture','Synthetic recovery evidence',1900,'CNY',30,1000000);
 INSERT INTO orders(id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status,paid_at) VALUES('backup-order','backup-user','backup-plan','Backup fixture',1900,'CNY',30,1000000,'paid',now());
+INSERT INTO orders(id,user_id,plan_id,plan_name,price_minor,currency,duration_days,quota_bytes,status)
+ SELECT 'backup-order-'||g,'backup-user','backup-plan','Backup fixture',1900,'CNY',30,1000000,'pending'
+ FROM generate_series(1,4097) g;
 INSERT INTO payment_events(provider,event_id,order_id,amount_minor,currency) VALUES('test','backup-event','backup-order',1900,'CNY');
 INSERT INTO payment_intents(id,order_id,provider,status,transaction_id,paid_at) VALUES('backup-payment','backup-order','alipay','paid','backup-transaction',now());
 INSERT INTO entitlement_periods(id,user_id,order_id,plan_name,starts_at,ends_at,quota_bytes,used_bytes) VALUES('backup-period','backup-user','backup-order','Backup fixture',now()-interval '1 hour',now()+interval '1 day',1000000,12345);
@@ -379,7 +426,7 @@ def self_test(backend: Backend, directory: Path) -> dict:
         backend.sql(source, fixture_migrations() + FIXTURE_SQL)
         manifest = backup(backend, source, archive)
         result = restore(backend, archive, "xui_restore_" + secrets.token_hex(12), keep=False)
-        if manifest["evidence"]["critical_sums"].get("public.usage_items.uplink_bytes") != "2345" or manifest["evidence"]["critical_sums"].get("public.entitlement_periods.used_bytes") != "12345" or manifest["evidence"]["table_counts"].get("public.staff_mfa_recovery") != 1:
+        if manifest["evidence"]["critical_sums"].get("public.usage_items.uplink_bytes") != "2345" or manifest["evidence"]["critical_sums"].get("public.entitlement_periods.used_bytes") != "12345" or manifest["evidence"]["table_counts"].get("public.staff_mfa_recovery") != 1 or manifest["evidence"]["table_counts"].get("public.orders", 0) <= FINGERPRINT_BATCH_ROWS:
             raise BackupError("fixture_evidence_invalid")
         return {"self_test": True, "full_migrations": True, "synthetic_financial_and_usage_rows": True,
                 "synthetic_mfa_security_state": True, "temporary_databases_removed": True, **result}

@@ -549,6 +549,9 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,'plan.created',$2)`, u.ID, p.ID)
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, u) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {

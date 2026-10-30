@@ -136,6 +136,9 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,'node.configured',$2)`, admin.ID, r.PathValue("id"))
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, admin) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {

@@ -27,7 +27,7 @@ python3 -B scripts/release.py verify --root /srv/xui --release "$release_id"
 
 模板位于 [xui-control.service](../deploy/systemd/xui-control.service) 和 [xui-agent.service](../deploy/systemd/xui-agent.service)。按实际主机修改路径、域名和账号后安装。模板不自动创建系统账号、目录、证书或环境文件，也不授予低于 1024 的端口权限。
 
-控制面使用独立的 `xui` 系统账号、`/var/lib/xui` 工作目录和 `/etc/xui/control.env`。环境文件及 MFA 密钥文件权限设为 `0600`、属主为服务账号。生产配置包括 `APP_MODE=production`、HTTPS `PUBLIC_ORIGIN`、数据库和邮件配置、`MFA_KEY_FILE`、可信代理网段；详见安全与邮件验收文档。API 默认仅监听 `127.0.0.1:8080`，由 HTTPS 反向代理接入。`/readyz` 应由主机或管理网络访问。
+控制面使用独立的 `xui` 系统账号、`/var/lib/xui` 工作目录和 `/etc/xui/control.env`。环境文件及 MFA 密钥文件权限设为 `0600`、属主为服务账号。生产配置包括 `APP_MODE=production`、HTTPS `PUBLIC_ORIGIN`、数据库和邮件配置、`MFA_KEY_FILE`、可信代理网段；详见安全与邮件验收文档。API 默认仅监听 `127.0.0.1:8080`，由 HTTPS 反向代理接入。`/readyz` 应由主机或管理网络访问。完整入口、静态目录和日志策略见[生产部署](production-deployment.md)及 [Nginx 模板](../deploy/nginx/xui.conf.example)。
 
 服务在 SIGTERM 后等待在途 HTTP 和持久工作退出，systemd 最长等待 30 秒。重启期间新请求仍可能短暂失败；同机单实例切换不等于无中断滚动发布。负载均衡、多实例调度和迁移兼容性必须在实际拓扑上另行验收。重启限速可避免配置错误导致无限快速重启。
 

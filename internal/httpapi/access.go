@@ -253,6 +253,9 @@ func (s *Server) mutateNodeGroup(w http.ResponseWriter, r *http.Request, update 
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,$2,$3)`, actor.ID, action, id)
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, actor) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {
@@ -335,6 +338,9 @@ func (s *Server) setPlanNodeGroups(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,'plan.node_groups_updated',$2)`, actor.ID, r.PathValue("id"))
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, actor) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {
@@ -415,6 +421,9 @@ func (s *Server) retryEvent(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,'event.retry_requested',$2)`, actor.ID, r.PathValue("id"))
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, actor) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {
@@ -449,6 +458,9 @@ func (s *Server) revokeEntitlement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if revoked != nil {
+		if !s.authorizeStaffTx(w, r, tx, actor) {
+			return
+		}
 		reply(w, 200, map[string]bool{"ok": true})
 		return
 	}
@@ -461,6 +473,9 @@ func (s *Server) revokeEntitlement(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_id,action,resource_id) VALUES($1,'entitlement.revoked',$2)`, actor.ID, r.PathValue("id"))
 	}
 	if err == nil {
+		if !s.authorizeStaffTx(w, r, tx, actor) {
+			return
+		}
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {

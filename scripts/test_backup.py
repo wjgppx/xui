@@ -1,11 +1,14 @@
 """Fast safety tests; the separate self-test runs native PostgreSQL recovery."""
+import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("xui_backup", Path(__file__).with_name("backup.py"))
@@ -13,7 +16,8 @@ backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
 
 
-EVIDENCE = {"table_counts": {"public.orders": 2}, "financial_fingerprints": {"public.orders": "fixture"},
+EVIDENCE = {"fingerprint_algorithm": backup.FINGERPRINT_ALGORITHM,
+            "table_counts": {"public.orders": 2}, "financial_fingerprints": {"public.orders": "fixture"},
             "critical_sums": {"public.orders.price_minor": "3800"}, "constraints": [], "indexes": [], "triggers": []}
 
 
@@ -75,7 +79,7 @@ class BackupSafetyTest(unittest.TestCase):
         self.backend = FakeBackend()
 
     def make_archive(self):
-        with patch.object(backup, "SnapshotSession", FakeSession), patch.object(backup, "snapshot_evidence", return_value=EVIDENCE):
+        with patch.object(backup, "SnapshotSession", FakeSession), patch.object(backup, "snapshot_evidence", return_value=copy.deepcopy(EVIDENCE)):
             return backup.backup(self.backend, "fixture_database", self.path)
 
     def restore(self, keep=False, evidence=EVIDENCE):
@@ -203,6 +207,56 @@ class BackupSafetyTest(unittest.TestCase):
         self.assertIn("CREATE TABLE fund_ledger_accounts", sql)
         self.assertIn("INSERT INTO schema_migrations(version) VALUES(15)", sql)
         self.assertTrue(sql.endswith("COMMIT;\n"))
+
+    def test_legacy_archive_can_be_verified_but_never_restored_as_v2(self):
+        manifest = self.make_archive()
+        manifest["format"] = backup.LEGACY_FORMAT
+        manifest["evidence"].pop("fingerprint_algorithm", None)
+        backup.manifest_path(self.path).write_text(json.dumps(manifest))
+        self.assertEqual(backup.verify(self.path)["format"], backup.LEGACY_FORMAT)
+        with self.assertRaisesRegex(backup.BackupError, "legacy_backup_restore_requires_v1_tool"):
+            self.restore()
+        self.assertEqual(self.backend.created, [])
+        self.assertEqual(self.backend.restored, [])
+
+    def test_v2_manifest_requires_its_explicit_fingerprint_algorithm(self):
+        manifest = self.make_archive()
+        manifest["evidence"]["fingerprint_algorithm"] = "unknown"
+        backup.manifest_path(self.path).write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(backup.BackupError, "invalid_manifest"):
+            backup.verify(self.path)
+
+
+class FingerprintStreamTest(unittest.TestCase):
+    def stream(self, data):
+        session = object.__new__(backup.SnapshotSession)
+        session.process = SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO(data))
+        commands = []
+        session.query = lambda statement: commands.append(statement) or "1"
+        return session, commands
+
+    def test_multiple_batches_produce_one_ordered_stream_digest(self):
+        values = sorted(hashlib.sha256(value).hexdigest() for value in [b"first", b"second", b"third"])
+        data = "\n".join(values[:2] + [backup.FINGERPRINT_END] + values[2:] + [backup.FINGERPRINT_END]) + "\n"
+        session, commands = self.stream(data)
+        expected = hashlib.sha256((backup.FINGERPRINT_ALGORITHM + "\n" + "\n".join(values) + "\n").encode()).hexdigest()
+        with patch.object(backup, "FINGERPRINT_BATCH_ROWS", 2):
+            self.assertEqual(session.row_fingerprint('"public"."orders"'), expected)
+        self.assertEqual(session.process.stdin.getvalue().count("FETCH FORWARD 2"), 2)
+        self.assertIn("DECLARE xui_fingerprint", commands[0])
+        self.assertIn('ORDER BY fingerprint COLLATE "C"', commands[0])
+        self.assertIn("CLOSE xui_fingerprint", commands[-1])
+        self.assertNotIn("string_agg", " ".join(commands))
+
+    def test_empty_and_invalid_or_truncated_streams_are_not_confused(self):
+        empty, _ = self.stream(backup.FINGERPRINT_END + "\n")
+        expected = hashlib.sha256((backup.FINGERPRINT_ALGORITHM + "\n").encode()).hexdigest()
+        self.assertEqual(empty.row_fingerprint('"public"."orders"'), expected)
+        for data in ("", "x" * 64, "private-row-data\n", "a" * 200 + "\n"):
+            with self.subTest(length=len(data)):
+                session, _ = self.stream(data)
+                with self.assertRaisesRegex(backup.BackupError, "snapshot_fingerprint_failed"):
+                    session.row_fingerprint('"public"."orders"')
 
 
 if __name__ == "__main__":

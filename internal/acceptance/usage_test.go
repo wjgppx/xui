@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wjgppx/xui/internal/agentwire"
 	"github.com/wjgppx/xui/internal/httpapi"
 	"github.com/wjgppx/xui/internal/nodeagent"
 	"github.com/wjgppx/xui/internal/store"
@@ -132,6 +134,8 @@ type transport struct {
 	base                                       http.RoundTripper
 	offline, lost                              bool
 	offlineAttempts, wireAttempts, lostReplies int64
+	deadlineFailures                           int64
+	lastFailure                                string
 }
 
 func (tr *transport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -140,7 +144,17 @@ func (tr *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, errors.New("injected controller transport outage")
 	}
 	tr.wireAttempts++
+	tr.lastFailure = ""
 	response, err := tr.base.RoundTrip(r)
+	if err != nil {
+		tr.lastFailure = "transport_unavailable"
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+			tr.deadlineFailures++
+			tr.lastFailure = "transport_deadline"
+		}
+	} else if response.StatusCode < 200 || response.StatusCode >= 300 {
+		tr.lastFailure = "http_" + strconv.Itoa(response.StatusCode)
+	}
 	if err == nil && !tr.lost && r.URL.Path == "/agent/v1/usage-batches" && response.StatusCode == http.StatusOK {
 		// The real HTTP handler already committed. Drop only its first reply;
 		// the client must replay exactly the durable pending batch.
@@ -158,6 +172,14 @@ type workerResult struct {
 	outages, wire, lost        int64
 	latency                    latencyHistogram
 	failure                    string
+	failureCause               string
+	failurePending             int64
+	remainingEncodedBytes      int64
+	recoveryAttempts           int64
+	recovered                  bool
+	deadlineFailures           int64
+	failedAfterSeconds         float64
+	recoveryLatency            latencyHistogram
 }
 
 type acceptanceReport struct {
@@ -184,6 +206,15 @@ type acceptanceReport struct {
 	InjectedLostReplies         int64     `json:"injected_lost_replies"`
 	LedgerReopens               int64     `json:"ledger_reopens"`
 	PendingBatches              int64     `json:"pending_batches"`
+	PendingEncodedBytes         int64     `json:"pending_encoded_bytes"`
+	PendingBatchesAtFailure     int64     `json:"pending_batches_at_failure"`
+	RecoveryAttempts            int64     `json:"recovery_attempts"`
+	RecoveredWorkers            int64     `json:"recovered_workers"`
+	DeliveryDeadlineFailures    int64     `json:"delivery_deadline_failures"`
+	FirstFailureAfterSeconds    float64   `json:"first_failure_after_seconds"`
+	DeliveryFailureCauses       []string  `json:"delivery_failure_causes"`
+	RecoveryFlushLatencyMaxMS   float64   `json:"recovery_flush_latency_max_ms"`
+	RetainedLedgerDirectory     string    `json:"retained_ledger_directory,omitempty"`
 	FailureCodes                []string  `json:"failure_codes"`
 	FlushLatencyP50UpperMS      float64   `json:"flush_latency_p50_upper_ms"`
 	FlushLatencyP95UpperMS      float64   `json:"flush_latency_p95_upper_ms"`
@@ -256,7 +287,7 @@ func echoServer(t *testing.T) string {
 	return listener.Addr().String()
 }
 
-func worker(c workloadConfig, origin, probe, node, token, user, period, path string, start, stop time.Time) (result workerResult) {
+func worker(c workloadConfig, origin, probe, node, token, user, period, path string, start, stop time.Time, decorate ...func(http.RoundTripper) http.RoundTripper) (result workerResult) {
 	ledger, err := usageledger.Open(path)
 	if err != nil {
 		result.failure = "ledger_open_failed"
@@ -264,11 +295,27 @@ func worker(c workloadConfig, origin, probe, node, token, user, period, path str
 	}
 	defer func() {
 		if ledger != nil {
-			ledger.Close()
+			// Every exit must describe retained durable evidence. A failed flush
+			// must never leave the report's default pending=0 as a false result.
+			count, encodedBytes, statsErr := ledger.Stats()
+			if statsErr != nil {
+				result.failure = "ledger_stats_failed"
+			} else {
+				result.remaining, result.remainingEncodedBytes = count, encodedBytes
+			}
+			if closeErr := ledger.Close(); closeErr != nil && result.failure == "" {
+				result.failure = "ledger_close_failed"
+			}
 		}
 	}()
 	tr := &transport{base: http.DefaultTransport, offline: true}
-	defer func() { result.outages, result.wire, result.lost = tr.offlineAttempts, tr.wireAttempts, tr.lostReplies }()
+	if len(decorate) > 0 {
+		tr.base = decorate[0](tr.base)
+	}
+	defer func() {
+		result.outages, result.wire, result.lost = tr.offlineAttempts, tr.wireAttempts, tr.lostReplies
+		result.deadlineFailures = tr.deadlineFailures
+	}()
 	client := &nodeagent.Client{State: nodeagent.State{Controller: origin, NodeID: node, AgentToken: token}, Outbox: ledger, HTTP: &http.Client{Transport: tr, Timeout: 6 * time.Second}}
 	if err = ledger.BindIdentity(origin + "\x00" + node); err != nil {
 		result.failure = "ledger_identity_failed"
@@ -327,7 +374,18 @@ func worker(c workloadConfig, origin, probe, node, token, user, period, path str
 		result.latency.add(time.Since(before))
 		if err != nil && result.samples > 3 {
 			result.failure = "usage_delivery_failed"
-			return result
+			result.failureCause = tr.lastFailure
+			if result.failureCause == "" {
+				result.failureCause = "delivery_or_acknowledgement_failed"
+			}
+			result.failedAfterSeconds = time.Since(start).Seconds()
+			if result.failurePending, _, err = ledger.Stats(); err != nil {
+				result.failure = "ledger_stats_failed"
+				return result
+			}
+			// Stop generating payload after a real delivery failure, then check
+			// bounded replay recovery. Recovery cannot erase the failed workload.
+			break
 		}
 		if delay := c.interval - time.Since(iteration); delay > 0 {
 			timer := time.NewTimer(delay)
@@ -339,17 +397,18 @@ func worker(c workloadConfig, origin, probe, node, token, user, period, path str
 		before := time.Now()
 		err = client.FlushUsage(context.Background())
 		result.latency.add(time.Since(before))
+		if result.failure != "" {
+			result.recoveryAttempts++
+			result.recoveryLatency.add(time.Since(before))
+		}
 		if err == nil {
 			break
 		}
 	}
-	if err != nil {
+	if err != nil && result.failure == "" {
 		result.failure = "final_delivery_failed"
 	}
-	result.remaining, _, err = ledger.Stats()
-	if err != nil {
-		result.failure = "ledger_stats_failed"
-	}
+	result.recovered = result.failure == "usage_delivery_failed" && err == nil
 	return result
 }
 
@@ -391,23 +450,54 @@ func TestLoadUsageNetworkRecoveryAndExactAccounting(t *testing.T) {
 	started := time.Now().UTC()
 	stop := started.Add(c.duration)
 	results := make([]workerResult, c.workers)
+	ledgerDirectory := t.TempDir()
+	if c.reportPath != "" {
+		parent := filepath.Dir(c.reportPath)
+		if err = os.MkdirAll(parent, 0700); err != nil {
+			t.Fatal("acceptance evidence directory unavailable")
+		}
+		info, err := os.Lstat(parent)
+		if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+			t.Fatal("acceptance evidence directory must be private")
+		}
+		ledgerDirectory, err = os.MkdirTemp(parent, ".usage-ledgers-*")
+		if err != nil {
+			t.Fatal("acceptance ledger evidence directory unavailable")
+		}
+	}
 	var group sync.WaitGroup
 	for i := range results {
 		group.Add(1)
-		path := filepath.Join(t.TempDir(), "usage.sqlite")
+		path := filepath.Join(ledgerDirectory, fmt.Sprintf("node-%02d", i), "usage.sqlite")
 		go func(i int) {
 			defer group.Done()
 			results[i] = worker(c, server.URL, probe, nodes[i], tokens[i], user, period, path, started.Add(-time.Millisecond), stop)
 		}(i)
 	}
 	group.Wait()
-	report := acceptanceReport{Version: "usage-acceptance-v1", Status: "failed", StartedAt: started, CompletedAt: time.Now().UTC(), RequestedDurationSeconds: c.duration.Seconds(), Workers: c.workers, SampleIntervalMS: float64(c.interval) / float64(time.Millisecond), FailureCodes: []string{}, CountingBoundary: "actual loopback TCP application payload copied into sampled counters; not Xray/TLS framing or unobserved crash-window loss"}
+	report := acceptanceReport{Version: "usage-acceptance-v2", Status: "failed", StartedAt: started, CompletedAt: time.Now().UTC(), RequestedDurationSeconds: c.duration.Seconds(), Workers: c.workers, SampleIntervalMS: float64(c.interval) / float64(time.Millisecond), FailureCodes: []string{}, DeliveryFailureCauses: []string{}, CountingBoundary: "actual loopback TCP application payload copied into sampled counters; not Xray/TLS framing or unobserved crash-window loss"}
 	latency := latencyHistogram{}
 	for _, result := range results {
 		report.MeasuredPayloadBytes += result.measured
 		report.PersistedSampleBytes += result.sampled
 		report.Samples += result.samples
 		report.PendingBatches += result.remaining
+		report.PendingEncodedBytes += result.remainingEncodedBytes
+		report.PendingBatchesAtFailure += result.failurePending
+		report.RecoveryAttempts += result.recoveryAttempts
+		if result.recovered {
+			report.RecoveredWorkers++
+		}
+		report.DeliveryDeadlineFailures += result.deadlineFailures
+		if result.failedAfterSeconds > 0 && (report.FirstFailureAfterSeconds == 0 || result.failedAfterSeconds < report.FirstFailureAfterSeconds) {
+			report.FirstFailureAfterSeconds = result.failedAfterSeconds
+		}
+		if result.failureCause != "" {
+			report.DeliveryFailureCauses = append(report.DeliveryFailureCauses, result.failureCause)
+		}
+		if result.recoveryLatency.MaxMS > report.RecoveryFlushLatencyMaxMS {
+			report.RecoveryFlushLatencyMaxMS = result.recoveryLatency.MaxMS
+		}
 		report.InjectedOutageAttempts += result.outages
 		report.WireAttempts += result.wire
 		report.InjectedLostReplies += result.lost
@@ -432,6 +522,13 @@ func TestLoadUsageNetworkRecoveryAndExactAccounting(t *testing.T) {
 	valid := len(report.FailureCodes) == 0 && report.Samples >= int64(c.workers*4) && report.UniqueBatches == report.Samples && report.PendingBatches == 0 && report.MeasuredPayloadBytes == report.PersistedSampleBytes && report.PersistedSampleBytes == report.AcceptedPayloadBytes && report.AcceptedPayloadBytes == report.UsageItemBytes && report.UsageItemBytes == report.EntitlementUsedBytes && report.InjectedOutageAttempts == int64(c.workers*2) && report.InjectedLostReplies == int64(c.workers) && report.ReplayRequests == int64(c.workers) && report.LedgerReopens == int64(c.workers)
 	if valid {
 		report.Status = "passed"
+		if err = os.RemoveAll(ledgerDirectory); err != nil {
+			t.Fatal("acceptance successful ledger cleanup failed")
+		}
+	} else if c.reportPath != "" {
+		// Keep failed synthetic SQLite evidence next to the private report.
+		// Its isolated PostgreSQL fixture is still cleaned by testutil.
+		report.RetainedLedgerDirectory = ledgerDirectory
 	}
 	if err = writeReport(c.reportPath, report); err != nil {
 		t.Fatal(err)
@@ -495,5 +592,118 @@ func TestLatencyHistogramOverflowAndMergeRetainRealUpperBounds(t *testing.T) {
 	report := acceptanceReport{FlushLatencyP95UpperMS: short.percentile(.95), FlushLatencyMaxMS: short.MaxMS, FlushLatencyOver10sSamples: short.Counts[len(latencyBoundsMS)]}
 	if _, err := json.Marshal(report); err != nil {
 		t.Fatal("latency evidence is not JSON serializable")
+	}
+}
+
+type batchTimeoutTransport struct {
+	base     http.RoundTripper
+	repeated bool
+	injected bool
+	timedOut agentwire.UsageBatch
+	deadline time.Duration
+}
+
+func (tr *batchTimeoutTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.GetBody != nil {
+		body, err := r.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		var batch agentwire.UsageBatch
+		err = json.NewDecoder(body).Decode(&batch)
+		body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if batch.Sequence == 4 && (!tr.injected || tr.repeated) {
+			tr.injected, tr.timedOut = true, batch
+			// Shorten only the synthetic transport's deadline. The production
+			// FlushUsage five-second budget and HTTP implementation stay intact.
+			ctx, cancel := context.WithTimeout(r.Context(), tr.deadline)
+			defer cancel()
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	}
+	return tr.base.RoundTrip(r)
+}
+
+func TestWorkerDeliveryTimeoutPreservesFailureAndDurableReplay(t *testing.T) {
+	for _, repeated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("outage_persists_%t", repeated), func(t *testing.T) {
+			var mutex sync.Mutex
+			accepted := map[string]string{}
+			var deliveredBytes int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var batch agentwire.UsageBatch
+				if json.NewDecoder(r.Body).Decode(&batch) != nil {
+					http.Error(w, "invalid fixture batch", 400)
+					return
+				}
+				digest, err := agentwire.UsageDigest(batch)
+				if err != nil {
+					http.Error(w, "invalid fixture digest", 400)
+					return
+				}
+				mutex.Lock()
+				previous, exists := accepted[batch.BatchID]
+				if exists && previous != digest {
+					mutex.Unlock()
+					http.Error(w, "changed immutable evidence", 409)
+					return
+				}
+				if !exists {
+					accepted[batch.BatchID] = digest
+					for _, item := range batch.Items {
+						deliveredBytes += item.UplinkBytes + item.DownlinkBytes
+					}
+				}
+				mutex.Unlock()
+				_ = json.NewEncoder(w).Encode(agentwire.UsageAck{BatchID: batch.BatchID, Digest: digest})
+			}))
+			defer server.Close()
+			path := filepath.Join(t.TempDir(), "usage.sqlite")
+			var timeout *batchTimeoutTransport
+			start := time.Now().UTC().Add(-time.Millisecond)
+			result := worker(workloadConfig{interval: 100 * time.Millisecond}, server.URL, echoServer(t), store.ID(), store.ID()+store.ID(), store.ID(), store.ID(), path, start, start.Add(10*time.Second), func(base http.RoundTripper) http.RoundTripper {
+				timeout = &batchTimeoutTransport{base: base, repeated: repeated, deadline: 30 * time.Millisecond}
+				return timeout
+			})
+			if result.failure != "usage_delivery_failed" || result.failureCause != "transport_deadline" || result.failurePending != 1 || result.samples != 4 || result.deadlineFailures < 1 {
+				t.Fatalf("delivery failure or retained evidence misreported: %+v", result)
+			}
+			if result.recovered == repeated || result.recoveryAttempts < 1 {
+				t.Fatal("recovery erased the workload failure or was not recorded")
+			}
+			ledger, err := usageledger.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ledger.Close()
+			pending, err := ledger.Pending(10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			if repeated {
+				if result.remaining != 1 || result.remainingEncodedBytes <= 0 || len(pending) != 1 || deliveredBytes >= result.sampled {
+					t.Fatal("unrecovered delivery incorrectly reported zero pending evidence")
+				}
+				want, _ := agentwire.UsageDigest(timeout.timedOut)
+				got, _ := agentwire.UsageDigest(pending[0])
+				if got != want {
+					t.Fatal("failed immutable batch changed before retry")
+				}
+			} else {
+				if result.remaining != 0 || len(pending) != 0 || deliveredBytes != result.sampled || len(accepted) != 4 {
+					t.Fatal("recovery failed exact accounting or durable acknowledgement")
+				}
+				want, _ := agentwire.UsageDigest(timeout.timedOut)
+				if accepted[timeout.timedOut.BatchID] != want {
+					t.Fatal("recovery changed the original failed batch")
+				}
+			}
+		})
 	}
 }

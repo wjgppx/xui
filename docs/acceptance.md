@@ -12,7 +12,7 @@
 - `usage_items`归属明细的字节合计。
 - 权益周期`used_bytes`。
 
-上述合计、唯一批次数、预期重放数和本地待投递数量必须一致。控制端网络中断不代表代理链路断流；本验收的故障注入发生在计量投递边界。实际进程被`SIGKILL`后的WAL恢复由SQLite崩溃测试另外验证。
+上述合计、唯一批次数、预期重放数和本地待投递数量必须一致。预期故障之外的投递错误会立即停止该节点继续产流，仍使用生产`FlushUsage`的五秒期限进行最多四次原批次重放。即使重放恢复、最终差额归零，原来的失败代码仍保留，本次负载验收仍为失败；恢复正确不等于容量或时延验收通过。控制端网络中断不代表代理链路断流；本验收的故障注入发生在计量投递边界。实际进程被`SIGKILL`后的WAL恢复由SQLite崩溃测试另外验证。
 
 ## 运行
 
@@ -34,9 +34,13 @@ XUI_ACCEPTANCE_DURATION=30m XUI_ACCEPTANCE_WORKERS=4 bash scripts/test-acceptanc
 
 默认报告保存在Git忽略的`.local/acceptance/`，目录0700、文件0600；也可用`XUI_ACCEPTANCE_REPORT`指定不存在的目标文件。目标不能覆盖已有文件或跟随文件符号链接。报告不包含账号、节点令牌、数据库连接串或批次个人标识。
 
+配置报告路径后，成功运行清理自己的SQLite样本；失败运行将所有节点的私有SQLite账本保留在报告目录中的随机`.usage-ledgers-*`子目录，并在`retained_ledger_directory`记录路径。目录0700、账本0600，包含合成测试身份及样本，只用于故障核对，不提交Git。测试结束后随机PostgreSQL schema仍会删除，保留的账本不是能重新投递到生产环境的业务数据。未配置报告路径而直接运行Go测试时，账本仍是测试生命周期内的临时文件。
+
 ## 报告口径
 
-报告保存真实样本数量、测得字节、持久化/入账合计、账本重开次数、故障注入次数、重放请求数、未交批次以及有限失败代码。`observed_unpersisted_payload_bytes`只比较这次样本中实际观察的应用负载与成功采样字节；即使其为零，也不能推论未观察的内核崩溃窗口没有丢失。
+报告保存真实样本数量、测得字节、持久化/入账合计、账本重开次数、故障注入次数、重放请求数、未交批次以及有限失败代码。v2报告在所有节点退出路径都读取实际账本状态，避免错误退出时把默认零值当作`pending_batches`；`pending_encoded_bytes`是未交批次JSON编码的存储字节，不是代理流量字节。`observed_unpersisted_payload_bytes`只比较这次样本中实际观察的应用负载与成功采样字节；即使其为零，也不能推论未观察的内核崩溃窗口没有丢失。
+
+`pending_batches_at_failure`记录意外投递失败时的待交批次；`recovery_attempts`、`recovered_workers`、`recovery_flush_latency_max_ms`分别记录后续恢复尝试、恢复节点数及恢复调用最大时延。`delivery_deadline_failures`、`delivery_failure_causes`和`first_failure_after_seconds`给出有限的超时/HTTP分类及最早投递失败时间，不输出原始服务响应或凭据。最终`pending_batches`与五层字节合计分别核对；有失败代码时，即使最终完全恢复也不返回通过。
 
 延迟是一次`FlushUsage`调用的总时长，可能包含多批补报；p50/p95采用固定桶上界；超过10秒的溢出桶使用本次实际观测最大值作为上界，并单独记录最大时延和超过10秒的样本数。它不是精确的逐HTTP请求分位数，也不是公网SLA。`elapsed_seconds`记录本次实际测量持续时间；短时通过不能证明长期生产稳定性。
 

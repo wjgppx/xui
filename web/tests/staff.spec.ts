@@ -25,12 +25,24 @@ test('管理员分配客服角色，旧登录退出且客服仅显示获准的�
   await page.getByRole('textbox', { name: '按邮箱筛选账号', exact: true }).fill(supportEmail)
   const row = page.locator(`[data-user-id="${target.id}"]`)
   await expect(row).toContainText(supportEmail)
-  await row.locator('.staff-role').click()
-  await page.locator('.n-base-select-option').filter({ hasText: '客服' }).click()
+  const roleSelect = row.locator('.staff-role')
+  const selection = roleSelect.locator('.n-base-selection')
+  await expect(selection).not.toHaveClass(/n-base-selection--disabled/)
+  await selection.click()
+  const supportOption = page.locator('.n-base-select-option__content').filter({ hasText: /^客服$/ })
+  await expect(supportOption).toBeVisible()
+  await supportOption.click()
+  // Wait for the visible selection and enabled action before arming the HTTP
+  // assertion; a menu click alone does not establish that v-model changed.
+  await expect(roleSelect).toContainText('客服')
+  const saveRole = row.getByRole('button', { name: '保存角色', exact: true })
+  await expect(saveRole).toBeEnabled()
   page.once('dialog', dialog => dialog.accept())
-  const update = page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/users/${target.id}/role`) && response.request().method() === 'POST')
-  await row.getByRole('button', { name: '保存角色', exact: true }).click()
-  expect((await update).status()).toBe(200); changedRole = true
+  const [update] = await Promise.all([
+   page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/users/${target.id}/role`) && response.request().method() === 'POST'),
+   saveRole.click()
+  ])
+  expect(update.status()).toBe(200); changedRole = true
   await expect(page.getByRole('status').filter({ hasText: '角色已更新' })).toBeVisible()
   await expect(row.locator('.staff-role')).toContainText('客服')
   expect((await support.request.get('/api/v1/me')).status()).toBe(401)

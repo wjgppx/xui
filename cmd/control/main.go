@@ -5,7 +5,6 @@ import (
 	"flag"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -107,14 +106,9 @@ func main() {
 		slog.Error("staff second-factor configuration invalid", "error", err)
 		os.Exit(1)
 	}
-	origin := os.Getenv("PUBLIC_ORIGIN")
-	u, e := url.Parse(origin)
-	if e != nil || u.Host == "" || u.Path != "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		slog.Error("PUBLIC_ORIGIN must be a single HTTP(S) origin")
-		os.Exit(1)
-	}
-	if mode == "production" && u.Scheme != "https" {
-		slog.Error("production requires HTTPS PUBLIC_ORIGIN")
+	origin, err := controlconfig.PublicOrigin(mode == "production", os.Getenv("PUBLIC_ORIGIN"))
+	if err != nil {
+		slog.Error("public origin configuration invalid", "error", err)
 		os.Exit(1)
 	}
 	if mode == "development" {
@@ -175,7 +169,7 @@ func main() {
 		go func() { defer close(billDone); billfetch.Run(ctx, s, registry) }()
 		defer func() { stop(); <-billDone }()
 	}
-	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: u.Scheme == "https", RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled, BillDownloadsEnabled: billDownloadsEnabled, TrustedProxy: trustedProxy, MFAKey: mfaKey, RequireStaffMFA: requireStaffMFA, ReleaseID: releaseID})
+	app := httpapi.New(s, httpapi.Config{Origin: origin, Development: mode == "development", SecureCookies: strings.HasPrefix(origin, "https://"), RequireVerified: s.RequireVerified, Payments: registry, PaymentActionsEnabled: actionsEnabled, BillDownloadsEnabled: billDownloadsEnabled, TrustedProxy: trustedProxy, MFAKey: mfaKey, RequireStaffMFA: requireStaffMFA, ReleaseID: releaseID})
 	server := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	shutdownDone := shutdownOnCancel(ctx, server, 10*time.Second)
 	slog.Info("control API started", "address", addr, "mode", mode)

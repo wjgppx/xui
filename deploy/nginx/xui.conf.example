@@ -1,0 +1,155 @@
+# Include inside nginx's http {} context, for example in conf.d/xui.conf.
+# Replace panel.example.com and both certificate paths before nginx -t/reload.
+# The public tree contains only copied web artifacts, never /srv/xui itself.
+map $http_host $xui_allowed_host {
+    default 0;
+    panel.example.com 1;
+    panel.example.com:443 1;
+}
+
+# Do not log request URIs, arguments, headers, referrers or request bodies.
+# Subscription URLs and GET payment callbacks contain bearer/signature material.
+map $uri $xui_log_route {
+    default rejected;
+    / root;
+    /index.html index;
+    ~^/assets/ asset;
+    ~^/api/v1/subscriptions/ subscription;
+    ~^/api/v1/payments/notify/ payment_callback;
+    ~^/api/v1/ api;
+    ~^/agent/v1/ agent;
+}
+log_format xui_safe escape=json
+    '{"time":"$time_iso8601","peer":"$remote_addr","route":"$xui_log_route",'
+    '"method":"$request_method","status":$status,"bytes":$body_bytes_sent,'
+    '"seconds":$request_time}';
+
+# Only Vite content-hash assets receive long-lived caching. API/HTML never do.
+map $uri $xui_cache_control {
+    default "no-store";
+    '~^/assets/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8,}\.(js|css|woff2?|svg|png|jpe?g|webp|ico)$'
+        "public, max-age=31536000, immutable";
+}
+
+upstream xui_control {
+    server 127.0.0.1:8080;
+    keepalive 16;
+}
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    access_log off;
+    error_log /dev/null;
+    return 444;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name panel.example.com;
+    access_log /var/log/nginx/xui-access.log xui_safe;
+    error_log /dev/null;
+    return 308 https://panel.example.com$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+    access_log off;
+    error_log /dev/null;
+    return 444;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name panel.example.com;
+    if ($xui_allowed_host = 0) { return 444; }
+
+    ssl_certificate /etc/letsencrypt/live/panel.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/panel.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_session_tickets off;
+    server_tokens off;
+
+    root /var/www/xui/current;
+    disable_symlinks on from=$document_root;
+    access_log /var/log/nginx/xui-access.log xui_safe;
+    # nginx's built-in request error messages include full URLs. Use this safe
+    # access log plus the application's structured errors, not raw request logs.
+    error_log /dev/null;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Cache-Control $xui_cache_control always;
+
+    client_max_body_size 2m;
+    client_body_timeout 15s;
+    send_timeout 20s;
+    gzip off;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host panel.example.com;
+    # This template is the public edge: overwrite untrusted inbound identity.
+    # The Go service should trust only 127.0.0.1/32 for this exact topology.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP "";
+    proxy_set_header Forwarded "";
+    proxy_set_header X-Forwarded-Host "";
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_pass_request_headers on;
+    proxy_pass_request_body on;
+    proxy_request_buffering on;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_intercept_errors off;
+    proxy_connect_timeout 3s;
+    proxy_send_timeout 20s;
+    proxy_read_timeout 20s;
+
+    # Backend versions stay authoritative. Unknown API routes return their real
+    # status and can never be swallowed by an HTML SPA fallback.
+    location = /api/v1/admin/statements/native {
+        client_max_body_size 12m;
+        proxy_pass http://xui_control;
+    }
+    location ^~ /api/v1/payments/notify/ {
+        client_max_body_size 64k;
+        proxy_pass http://xui_control;
+    }
+    location ^~ /api/v1/ { proxy_pass http://xui_control; }
+    location ^~ /agent/v1/ { proxy_pass http://xui_control; }
+    location /api/ { return 404; }
+    location /agent/ { return 404; }
+
+    # Check readiness directly at 127.0.0.1:8080 from the deployment host.
+    location = /healthz { return 404; }
+    location = /readyz { return 404; }
+    location ~ /\. { return 404; }
+
+    location = / {
+        limit_except GET { deny all; }
+        try_files /index.html =404;
+    }
+    location = /index.html {
+        limit_except GET { deny all; }
+        try_files $uri =404;
+    }
+    location /assets/ {
+        limit_except GET { deny all; }
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types application/javascript text/css image/svg+xml font/woff2;
+        try_files $uri =404;
+    }
+    location / { return 404; }
+}

@@ -257,7 +257,10 @@ func settleTx(ctx context.Context, tx pgx.Tx, provider, eventID, orderID, userID
 	// SHARE locks used by grant foreign keys. A stronger user-row lock can form
 	// a cycle with group edits and node snapshot creation.
 	if err = tx.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE`, userID).Scan(&locked); err != nil {
-		return ErrNotFound
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
 	}
 	var o Order
 	err = tx.QueryRow(ctx, `SELECT id,user_id,plan_name,price_minor,currency,duration_days,quota_bytes,status FROM orders WHERE id=$1 AND user_id=$2 FOR NO KEY UPDATE`, orderID, userID).Scan(&o.ID, &o.UserID, &o.PlanName, &o.Price, &o.Currency, &o.Days, &o.Quota, &o.Status)

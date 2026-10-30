@@ -55,7 +55,23 @@ func (s *Server) setStaffRole(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "后台角色不正确")
 		return
 	}
-	err := s.Store.SetUserRole(r.Context(), u.ID, r.PathValue("id"), body.Role, false)
+	err := s.Store.SetUserRoleForSession(r.Context(), u.ID, r.PathValue("id"), body.Role, mfaSessionHash(r), u.SecurityVersion, s.Config.RequireStaffMFA)
+	if errors.Is(err, store.ErrRoleSessionInvalid) {
+		fail(w, http.StatusUnauthorized, "登录已失效，请重新登录")
+		return
+	}
+	if errors.Is(err, store.ErrRoleMFARequired) {
+		reply(w, http.StatusForbidden, map[string]string{"error": "请先完成二次验证后再访问后台", "code": "mfa_required"})
+		return
+	}
+	if errors.Is(err, store.ErrRoleMFAEnrollmentRequired) {
+		reply(w, http.StatusForbidden, map[string]string{"error": "请先在账号安全中启用二次验证", "code": "mfa_enrollment_required"})
+		return
+	}
+	if errors.Is(err, store.ErrEmailUnverified) {
+		fail(w, http.StatusForbidden, "请先完成邮箱验证")
+		return
+	}
 	if errors.Is(err, store.ErrRoleForbidden) {
 		fail(w, 403, "管理员权限已变化，请重新登录")
 		return
