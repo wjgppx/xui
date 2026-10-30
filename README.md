@@ -4,6 +4,8 @@
 
 完整规划见 [开发方案](docs/development-plan.md)，实际进度见 [交付记录](docs/delivery.md)，交易与周期规则见 [业务规则](docs/business-rules.md)，本轮结果见 [验证记录](docs/verification.md)。
 
+GitHub Pages 可发布带明确说明的交互演示，仅使用页面内存中的模拟数据；真实账号、支付、邮件与节点服务仍由 Go 和 PostgreSQL 提供。发布流程与状态核实方式见 [GitHub 测试站](docs/github-test-site.md)。
+
 ## 本地开发
 
 需要 Go 1.27.3、C 编译器（GCC）、Node.js 24、npm、Docker Compose。Agent 的 SQLite 驱动使用 CGO，构建时要求 `CGO_ENABLED=1`；驱动内附 SQLite，不需要系统 SQLite 开发包。云工作区可运行安装脚本；其他平台先安装对应 Go 并设置 `XUI_GO_BIN`。

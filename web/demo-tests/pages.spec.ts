@@ -1,0 +1,88 @@
+import { expect, test, type Page } from '@playwright/test'
+
+function observe(page: Page) {
+ const requests: string[] = [], errors: string[] = []
+ page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) requests.push(request.url()) })
+ page.on('pageerror', error => errors.push(error.message))
+ return { requests, errors }
+}
+const nav = (page: Page, label: string) => page.getByRole('navigation').getByRole('button', { name: new RegExp(label) })
+
+test('项目路径下体验套餐购买与模拟权益，无API请求且刷新重置', async ({ page }) => {
+ const observed = observe(page)
+ await page.goto('./')
+ await expect(page.getByTestId('pages-demo-banner')).toContainText('模拟数据，无真实账号、收款或节点服务')
+ await page.getByRole('button', { name: '体验用户端', exact: true }).click()
+ await expect(page.getByText('user@demo.example.invalid', { exact: true })).toBeVisible()
+ await nav(page, '探索套餐').click()
+ await page.getByRole('button', { name: /选择 轻量连接/ }).click()
+ const row = page.locator('tr[data-order-id]').first()
+ await expect(row).toContainText('轻量连接')
+ await row.getByRole('button', { name: '确认测试支付', exact: true }).click()
+ await expect(row).toContainText('已开通')
+ await nav(page, '我的概览').click()
+ await expect(page.getByRole('heading', { name: '轻量连接', exact: true })).toBeVisible()
+ await expect(page.getByTestId('pages-demo-banner')).toBeVisible()
+ await page.reload()
+ await page.getByRole('button', { name: '体验用户端', exact: true }).click()
+ await nav(page, '我的订单').click()
+ await expect(page.getByRole('heading', { name: '还没有订单', exact: true })).toBeVisible()
+ expect(observed.requests).toEqual([])
+ expect(observed.errors).toEqual([])
+})
+
+test('后台读取模拟订单，账号与订阅不接收真实凭据', async ({ page }) => {
+ const observed = observe(page)
+ await page.goto('./')
+ await page.getByRole('button', { name: '体验用户端', exact: true }).click()
+ await nav(page, '探索套餐').click()
+ await page.getByRole('button', { name: /选择 日常连接/ }).click()
+ await page.getByRole('button', { name: '体验运营后台', exact: true }).click()
+ await expect(page.getByRole('heading', { name: '运营工作台', exact: true })).toBeVisible()
+ await expect(page.getByRole('table')).toContainText('日常连接')
+ await nav(page, '账号安全').click()
+ await expect(page.getByRole('heading', { name: '后台二次验证未配置', exact: true })).toBeVisible()
+ await expect(page.locator('input[type=password]')).toHaveCount(0)
+ await nav(page, '我的订阅').click()
+ await expect(page.getByRole('heading', { name: '订阅服务需要真实后端', exact: true })).toBeVisible()
+ await expect(page.getByRole('button', { name: '生成订阅链接', exact: true })).toHaveCount(0)
+ await page.getByRole('button', { name: '重置演示数据', exact: true }).click()
+ await page.getByRole('button', { name: '体验运营后台', exact: true }).click()
+ await expect(page.getByText('暂无订单。', { exact: true })).toBeVisible()
+ expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 })
+ expect(observed.requests).toEqual([])
+ expect(observed.errors).toEqual([])
+})
+
+test('后台样例页面可访问，真实节点和财务动作明确拒绝', async ({ page }) => {
+ const observed = observe(page)
+ await page.goto('./')
+ await page.getByRole('button', { name: '体验运营后台', exact: true }).click()
+ await nav(page, '节点管理').click()
+ await expect(page.getByText('演示节点（未连接服务器）', { exact: true })).toBeVisible()
+ await page.getByRole('button', { name: '＋ 注册节点', exact: true }).click()
+ await page.getByRole('textbox', { name: '节点名称', exact: true }).fill('仅测试样例')
+ await page.getByRole('button', { name: '生成注册令牌', exact: true }).click()
+ await expect(page.getByText(/此操作需要真实后端/).last()).toBeVisible()
+ await page.keyboard.press('Escape')
+ for (const [label, heading] of [['权限管理', '权限管理'], ['支付流水', '支付流水'], ['退款管理', '退款管理'], ['资金流水', '资金流水账本'], ['商户账单', '商户账单对账'], ['后台账号', '后台账号']] as const) {
+  await nav(page, label).click()
+  await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
+  await expect(page.getByTestId('pages-demo-banner')).toBeVisible()
+ }
+ expect(observed.requests).toEqual([])
+ expect(observed.errors).toEqual([])
+})
+
+test('移动端说明常驻，无横向溢出且登录入口使用一键演示', async ({ page }) => {
+ const observed = observe(page)
+ await page.setViewportSize({ width: 390, height: 844 })
+ await page.goto('./')
+ await page.getByRole('button', { name: '登录', exact: true }).click()
+ await expect(page.getByRole('button', { name: '退出', exact: true })).toBeVisible()
+ await expect(page.locator('input[type=password]')).toHaveCount(0)
+ await expect(page.getByTestId('pages-demo-banner')).toContainText('请勿输入真实密码')
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+ expect(observed.requests).toEqual([])
+ expect(observed.errors).toEqual([])
+})

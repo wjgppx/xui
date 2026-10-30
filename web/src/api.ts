@@ -10,6 +10,10 @@ export interface Overview { users: number; orders: number; paid_minor: number; p
 export interface PaymentMethod { id: 'alipay' | 'wechat' | 'epay_alipay' | 'epay_wechat'; name: string }
 export interface Payment { id: string; order_id: string; provider: PaymentMethod['id']; status: 'pending' | 'ready' | 'paid'; checkout_kind: 'redirect' | 'qr' | ''; checkout_url: string; transaction_id?: string | null; created_at: string; updated_at: string; paid_at: string | null }
 export async function api<T>(path: string, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+ if (import.meta.env.VITE_DEMO_MODE === 'true') {
+  const { demoRequest } = await import('./demo')
+  return demoRequest<T>(path, body)
+ }
  const response = await fetch('/api/v1' + path, { credentials: 'same-origin', method: body === undefined ? 'GET' : method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
  const data = await response.json()
  if (!response.ok) {

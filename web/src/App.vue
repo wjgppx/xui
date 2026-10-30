@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NConfigProvider, NInput, NInputNumber, NModal, NTag } from 'naive-ui'
-import { api, type User, type Plan, type Order, type Entitlement, type Overview, type PaymentMethod } from './api'
+import { api, APIError, type User, type Plan, type Order, type Entitlement, type Overview, type PaymentMethod } from './api'
 import NodeManager from './NodeManager.vue'
 import SubscriptionManager from './SubscriptionManager.vue'
 import AccessManager from './AccessManager.vue'
@@ -12,6 +12,9 @@ const PaymentOperations = defineAsyncComponent(() => import('./PaymentOperations
 const RefundOperations = defineAsyncComponent(() => import('./RefundOperations.vue'))
 const MerchantStatements = defineAsyncComponent(() => import('./MerchantStatements.vue'))
 const FundLedgers = defineAsyncComponent(() => import('./FundLedgers.vue'))
+const demoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+const DemoToolbar = import.meta.env.VITE_DEMO_MODE === 'true' ? defineAsyncComponent(() => import('./DemoToolbar.vue')) : null
+const DemoSecurity = import.meta.env.VITE_DEMO_MODE === 'true' ? defineAsyncComponent(() => import('./DemoSecurity.vue')) : null
 
 type View = 'overview' | 'plans' | 'orders' | 'subscription' | 'admin' | 'nodes' | 'access' | 'security' | 'staff' | 'payments' | 'refunds' | 'statements' | 'funds'
 const view = ref<View>('overview'), user = ref<User | null>(null), plans = ref<Plan[]>([]), orders = ref<Order[]>([]), entitlements = ref<Entitlement[]>([])
@@ -70,7 +73,7 @@ async function load() {
  loading.value = true; error.value = ''
  try {
   const [p, c] = await Promise.all([api<Plan[]>('/plans'), api<{ development_payments: boolean; development_mail: boolean; email_verification_required: boolean; payment_actions_enabled?: boolean; bill_downloads_enabled?: boolean }>('/config')]); plans.value = p; development.value = c.development_payments; developmentMail.value = c.development_mail; verificationRequired.value = c.email_verification_required; paymentActionsEnabled.value = c.payment_actions_enabled === true; billDownloadsEnabled.value = c.bill_downloads_enabled === true
-  const r = await fetch('/api/v1/me'); if (r.ok) user.value = await r.json(); else if (r.status !== 401) throw new Error('账号服务暂时不可用')
+  try { user.value = await api<User>('/me') } catch (e) { if (!(e instanceof APIError && e.status === 401)) throw new Error('账号服务暂时不可用'); user.value = null }
   await personal()
   await loadPaymentMethods()
  } catch (e) { error.value = e instanceof Error ? e.message : '加载失败' } finally { loading.value = false }
@@ -79,7 +82,11 @@ async function loadPaymentMethods() {
  paymentMethodsError.value = ''
  try { paymentMethods.value = await api<PaymentMethod[]>('/payment-methods') } catch { paymentMethods.value = []; paymentMethodsError.value = '暂时无法读取支付渠道，请刷新后重试。' }
 }
-function openAuth(register = false) { registering.value = register; authOpen.value = true; error.value = '' }
+function openAuth(register = false) { if (demoMode) { void switchDemo('user'); return }; registering.value = register; authOpen.value = true; error.value = '' }
+async function switchDemo(role: 'user' | 'admin' | 'reset') {
+ if (import.meta.env.VITE_DEMO_MODE !== 'true') return
+ await action(async () => { clearSession(); authOpen.value = false; planOpen.value = false; email.value = ''; password.value = ''; const { setDemoRole } = await import('./demo'); setDemoRole(role); await load(); view.value = role === 'admin' ? 'admin' : 'overview' })
+}
 function authenticate() { return action(async () => { user.value = await api<User>(registering.value ? '/auth/register' : '/auth/login', { email: email.value, password: password.value }); password.value = ''; authOpen.value = false; await personal(); notice.value = '欢迎回来，你的空间已准备就绪。' }) }
 function clearSession() { paymentOrder.value = null; user.value = null; orders.value = []; entitlements.value = []; overview.value = null; allOrders.value = []; linkAction.value = null; linkToken.value = ''; mfaForced.value = ''; view.value = 'overview' }
 function logout() { return action(async () => { await api('/auth/logout', {}); clearSession() }) }
@@ -164,13 +171,15 @@ onMounted(load)
    <main>
     <header class="topbar"><span class="breadcrumb">个人空间 <span>/</span> <strong>{{ labels[view] }}</strong></span><div class="account"><template v-if="user"><span class="avatar">{{ user.email[0]?.toUpperCase() }}</span><span class="account-email">{{ user.email }}</span><NButton text @click="logout" :disabled="busy">退出</NButton></template><template v-else><NButton text @click="openAuth()">登录</NButton><NButton type="primary" @click="openAuth(true)">创建账号 ↗</NButton></template></div></header>
     <div class="content">
-     <div v-if="development" class="dev-banner"><span>开发体验环境</span> 测试支付不会扣款；支付宝、微信等支付渠道以收银台为准。</div>
+     <component :is="DemoToolbar" v-if="demoMode" :busy="busy || loading" @select="switchDemo" />
+     <div v-if="development && !demoMode" class="dev-banner"><span>开发体验环境</span> 测试支付不会扣款；支付宝、微信等支付渠道以收银台为准。</div>
      <div v-if="error && !authOpen && !planOpen" role="alert" class="alert error">{{ error }} <button @click="load">重新加载</button></div>
      <div v-if="notice" role="status" class="alert success">{{ notice }}</div>
      <div v-if="mfaLocked" role="status" class="alert mfa-required-banner">{{ mfaEnrollmentRequired ? '后台需要先设置验证器，完成二次验证后才能使用管理功能。' : '后台二次验证尚未完成或已过期，请在账号安全中验证。' }} <NButton size="small" @click="view = 'security'">前往后台二次验证</NButton></div>
      <div v-if="loading" class="loading">正在准备你的空间…</div>
      <template v-else>
-      <AccountSecurity v-if="view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @mfa-disabled="mfaSignedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
+      <component :is="DemoSecurity" v-if="demoMode && (view === 'security' || view === 'subscription')" :subscription="view === 'subscription'" />
+      <AccountSecurity v-if="!demoMode && view === 'security'" :user="user" :development-mail="developmentMail" :verification-required="verificationRequired" :link-action="linkAction" :link-token="linkToken" @verified="refreshProfile" @signed-out="signedOut" @mfa-disabled="mfaSignedOut" @consumed="consumeLink" @login="openAuth()" @mail-action="useMailAction" />
       <PaymentOperations v-if="view === 'payments' && can('payments.read')" :can-retry="can('payments.retry')" :can-request-refund="can('refunds.request')" :can-close="can('payments.close')" :actions-enabled="paymentActionsEnabled" />
       <RefundOperations v-if="view === 'refunds' && can('refunds.read')" :can-approve="can('refunds.approve')" :actions-enabled="paymentActionsEnabled" />
       <FundLedgers v-if="view === 'funds' && can('funds.read')" :can-import="can('funds.import')" :can-reconcile="can('funds.reconcile')" />
@@ -178,7 +187,7 @@ onMounted(load)
       <StaffManager v-if="view === 'staff' && can('users.read')" :can-manage-roles="can('users.roles')" />
       <NodeManager v-if="view === 'nodes' && can('nodes.read')" />
       <AccessManager v-if="view === 'access' && can('access.read')" />
-      <SubscriptionManager v-if="view === 'subscription' && user" :key="user.id" />
+      <SubscriptionManager v-if="!demoMode && view === 'subscription' && user" :key="user.id" />
       <template v-if="view === 'overview'">
        <div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h1>{{ user ? '欢迎回来。' : '连接，从这里开始。' }}</h1><p>你的套餐、用量和订单，一目了然。</p></div><span class="date-pill">{{ new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }) }}</span></div>
        <section class="hero"><div><span class="hero-label">YOUR NEXT CONNECTION</span><h2>为工作与生活，<br/>留出更多可能。</h2><p>选择适合自己的套餐，<br class="mobile-break"/>在一个空间管理每次连接。</p><NButton color="#e5efb7" text-color="#183b35" size="large" @click="view = 'plans'">探索套餐 <span class="button-arrow">↗</span></NButton></div><div class="orbit-art" aria-hidden="true"><div class="orbit one"></div><div class="orbit two"></div><div class="orbit three"></div><span class="orbit-core">x</span><span class="satellite s1"></span><span class="satellite s2"></span><span class="orbit-caption">A LITTLE MORE POSSIBILITY.</span></div></section>

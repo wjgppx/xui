@@ -1,0 +1,120 @@
+name: Publish GitHub test site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.node-version'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Only this workflow publishes the static demo. The ordinary platform CI keeps
+# using the real API and database; pull-request artifacts are never deployed.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-test-site
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Build explicitly labelled static demo
+        working-directory: web
+        env:
+          VITE_DEMO_MODE: 'true'
+          VITE_BASE_PATH: '${{ steps.pages.outputs.base_path }}/'
+        run: npm ci && npm run build
+      - name: Disable Jekyll processing
+        run: touch web/dist/.nojekyll
+      - name: Install browser for static demo acceptance
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start isolated static preview
+        working-directory: web
+        env:
+          VITE_BASE_PATH: '${{ steps.pages.outputs.base_path }}/'
+        run: |
+          npx vite preview --host 127.0.0.1 --port 5174 --strictPort > "$RUNNER_TEMP/xui-pages-preview.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:5174${VITE_BASE_PATH}" > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/xui-pages-preview.log"
+          exit 1
+      - name: Verify demo interaction before publishing
+        working-directory: web
+        env:
+          XUI_DEMO_BASE_PATH: '${{ steps.pages.outputs.base_path }}/'
+        run: npx playwright test --config playwright.demo.config.ts
+      - name: Upload static files only
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+          retention-days: 1
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Prepare published-site acceptance
+        working-directory: web
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Verify published entry point
+        env:
+          XUI_PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          python3 - <<'PY'
+          import os, time, urllib.error, urllib.parse, urllib.request
+          target = os.environ['XUI_PAGES_URL']
+          parsed = urllib.parse.urlsplit(target)
+          if parsed.scheme != 'https' or not parsed.hostname:
+              raise SystemExit('Pages did not return a valid HTTPS site URL')
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(target, timeout=10) as response:
+                      document = response.read(65537)
+                      if response.status == 200 and len(document) <= 65536 and b'id="app"' in document:
+                          print('Published HTTPS entry point responds with the built application')
+                          break
+              except (OSError, urllib.error.URLError):
+                  pass
+              time.sleep(3)
+          else:
+              raise SystemExit('Published Pages entry point did not become available')
+          PY
+      - name: Verify published demo in a browser
+        working-directory: web
+        env:
+          XUI_DEMO_BASE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: npx playwright test --config playwright.demo.config.ts
